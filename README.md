@@ -2,6 +2,12 @@
 
 Touchline is a Windows desktop companion for FIFA 18 Player Career Mode. FIFA remains the authority for matches, statistics, transfers, tables, and selection; Touchline reads Player Career save files without modifying them, stages detected results for review, and builds a persistent world of teammates, managers, press, news, social reactions, relationships, memories, and emerging narratives around imported facts.
 
+## Screenshots
+
+![Career briefing dashboard](screenshots/screenshot2.png)
+
+![Squad synchronization view](screenshots/screenshot1.png)
+
 ## Technology and architecture
 
 The application uses .NET 9 and WPF for a native Windows experience, SQLite for a durable local career world, and the OpenAI Responses API for optional structured character dialogue. This choice keeps installation straightforward, permits future Windows-process integration, and provides clear separation between UI, application services, domain simulation, data providers, and persistence.
@@ -59,7 +65,7 @@ On first launch, a small career named **Touchline Demo (Fictional)** is created 
 
 Open **Career** and use the **Automatic FIFA 18 Sync** card. Touchline discovers the newest `Career*` file under the FIFA 18 settings directory. Enable the watcher to scan again after FIFA writes a save, or use **Scan newest save** at any time.
 
-On the first scan, Touchline creates a linked companion career automatically when the fictional demo is the only local career. Otherwise it asks before linking. The link includes the FIFA player, club, season, position, shirt number, current career date, teammates, verified club manager, named agent, FIFA news, progression baseline, and the next confirmed fixture.
+On the first scan, Touchline stages the detected FIFA save as a pending link. During automatic startup or watcher scans, it creates and links the companion career automatically when the fictional demo is the only local career. During a manual scan, it asks before linking. The link includes the FIFA player, club, season, position, shirt number, current career date, teammates, verified club manager, named agent, FIFA news, progression baseline, and the next confirmed fixture.
 
 A detected result is stored in the match-review inbox and survives restarts. The first result and every ambiguous result stay editable because cumulative statistics or unsupported fields may be uncertain. Once Touchline has a chronological baseline, a result is imported automatically only when the save proves exactly one new appearance and a matching FIFA review proves the opponent and score. Dismissed detections are remembered. Provider-linked match storage, events, reactions, and media are deduplicated so a retry cannot create another match.
 
@@ -102,10 +108,17 @@ Schema creation is versioned through `schema_migrations`; future migrations shou
 ```powershell
 dotnet test RPSystem.slnx -c Release
 dotnet build RPSystem.slnx -c Release
-dotnet publish src/CareerCompanion.App/CareerCompanion.App.csproj -c Release -r win-x64 --self-contained true
 dotnet run --project tools/CareerCompanion.Simulator -- 100
 dotnet run --project tools/CareerCompanion.Simulator -- --probe-fifa18 "C:\path\to\Career..."
 ```
+
+The Windows executable built by the repo is:
+
+```text
+src\CareerCompanion.App\bin\Release\net9.0-windows\CareerCompanion.App.exe
+```
+
+If you want a self-contained publish under `artifacts\win-x64`, add a Windows runtime identifier to the project or restore for `win-x64` before publishing.
 
 The simulator accepts a match count and optional output database path. It generates a repeatable career containing varied outcomes, goals, a red card, derbies, and cup fixtures, then reports event/media volume for spam and narrative inspection. `--probe-fifa18` parses and prints a save snapshot without importing it or changing the source file.
 
