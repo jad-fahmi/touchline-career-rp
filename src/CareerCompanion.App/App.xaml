@@ -69,12 +69,30 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ComboBoxItem">
-            <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="2">
-              <ContentPresenter VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
+            <Border x:Name="ItemBorder"
+                    Background="{TemplateBinding Background}"
+                    Padding="{TemplateBinding Padding}"
+                    CornerRadius="2"
+                    TextElement.Foreground="{TemplateBinding Foreground}">
+              <ContentPresenter x:Name="ItemContent"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                ContentStringFormat="{TemplateBinding ContentStringFormat}"
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource Stroke}"/><Setter Property="Foreground" Value="{StaticResource Text}"/></Trigger>
-              <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource Accent}"/><Setter Property="Foreground" Value="{StaticResource Shadow}"/></Trigger>
+              <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource Stroke}"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter TargetName="ItemBorder" Property="TextElement.Foreground" Value="{StaticResource Text}"/></Trigger>
+              <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource Accent}"/><Setter Property="Foreground" Value="{StaticResource Shadow}"/><Setter TargetName="ItemBorder" Property="TextElement.Foreground" Value="{StaticResource Shadow}"/></Trigger>
+              <MultiTrigger>
+                <MultiTrigger.Conditions>
+                  <Condition Property="IsSelected" Value="True"/>
+                  <Condition Property="IsHighlighted" Value="True"/>
+                </MultiTrigger.Conditions>
+                <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource Accent}"/>
+                <Setter Property="Foreground" Value="{StaticResource Shadow}"/>
+                <Setter TargetName="ItemBorder" Property="TextElement.Foreground" Value="{StaticResource Shadow}"/>
+              </MultiTrigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
