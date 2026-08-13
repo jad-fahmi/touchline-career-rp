@@ -42,6 +42,8 @@ internal static class Fifa18Metadata
                 ("WrfA","body",0))),
             ["Knen"] = new("managers", F(
                 ("mCXg","teamid",1),("VHIB","managerid",1),("HdeP","firstname",0),("rREd","surname",0))),
+            ["kISL"] = new("teamstadiumlinks", F(
+                ("mCXg","teamid",1),("DmlS","stadiumname",0),("fwCQ","stadiumid",0),("WMtm","forcedhome",0))),
             ["NgwF"] = new("career_competitionprogress", F(
                 ("mCXg","teamid",0),("GFQY","compshortname",0),("SDel","hasteamwon",0),
                 ("vojK","season",0),("KPUK","stageid",-1),("OvfW","compobjid",0))),

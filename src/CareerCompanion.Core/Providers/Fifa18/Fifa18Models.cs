@@ -61,6 +61,9 @@ public sealed record Fifa18DetectedFixture(
     string Evidence);
 
 public sealed record Fifa18WorldNews(string EventKey,string Date,string Title,string Body,int Importance);
+public sealed record Fifa18ScoutPlayer(string Name,string Position,int Overall);
+public sealed record Fifa18OpponentScout(string TeamName,string ManagerName,string StadiumName,bool IsRival,
+    IReadOnlyList<Fifa18ScoutPlayer> KeyPlayers,string SourceEvidence);
 
 public sealed record Fifa18ParsedCareer(
     string SourcePath,
@@ -93,7 +96,8 @@ public sealed record Fifa18ParsedCareer(
     IReadOnlyList<Fifa18WorldNews>? WorldNews = null,
     bool PlayerInjuryKnown = false,
     int NationalTeamId = -1,
-    string NationalTeamName = "");
+    string NationalTeamName = "",
+    Fifa18OpponentScout? OpponentScout = null);
 
 public enum Fifa18ScanDisposition { MatchDetected, MatchAutoImported, NoNewMatch, CareerMismatch, NoCareerSelected }
 public sealed record Fifa18ScanResult(Fifa18ScanDisposition Disposition, Fifa18ParsedCareer Parsed, string Message);

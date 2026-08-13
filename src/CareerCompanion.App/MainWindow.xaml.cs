@@ -17,18 +17,26 @@ public partial class MainWindow : Window
     private bool _fifaRescanRequested;
     private bool _fifaManualRescanRequested;
     private int _fifaWatcherRecoveryAttempt;
+    private bool _openingFifaReview;
     public MainWindow()
     {
         InitializeComponent();var overrideRoot=Environment.GetEnvironmentVariable("TOUCHLINE_DATA_DIR");var root=string.IsNullOrWhiteSpace(overrideRoot)?Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"TouchlineCareerCompanion"):Path.GetFullPath(overrideRoot);var db=new Database(Path.Combine(root,"career-world.db"));db.Migrate();new DemoSeeder(db).EnsureDemo();_vm=new MainViewModel(db);DataContext=_vm;_pages=[HomePage,WorldInboxPage,PreMatchPage,ReviewInboxPage,CareerPage,MatchPage,SquadPage,MessagesPage,ManagerPage,PressPage,NewsPage,SocialPage,TimelinePage,SettingsPage,DebugPage];Loaded+=async (_,_)=>{RestartFifaWatcher();if(_vm.AutoFifaWatch&&Directory.Exists(_vm.FifaSettingsDirectory))await ScanFifaAsync(true);await _vm.RunAutomaticGenerationAsync();};Closed+=(_,_)=>_fifaWatcher?.Dispose();
     }
-    private void Navigation_Changed(object sender,SelectionChangedEventArgs e){if(_pages is null)return;for(var i=0;i<_pages.Length;i++)_pages[i].Visibility=i==Navigation.SelectedIndex?Visibility.Visible:Visibility.Collapsed;if(Navigation.SelectedIndex==14)_vm.Refresh();}
+    private void Navigation_Changed(object sender,SelectionChangedEventArgs e){if(_pages is null)return;for(var i=0;i<_pages.Length;i++)_pages[i].Visibility=i==Navigation.SelectedIndex?Visibility.Visible:Visibility.Collapsed;if(Navigation.SelectedIndex==5){if(!_openingFifaReview)_vm.StartNewManualMatch();_openingFifaReview=false;}if(Navigation.SelectedIndex==14)_vm.Refresh();}
     private void Guard(Action action){try{action();}catch(Exception ex){MessageBox.Show(ex.Message,"Touchline",MessageBoxButton.OK,MessageBoxImage.Warning);}}
     private void CreateCareer_Click(object sender,RoutedEventArgs e)=>Guard(_vm.CreateCareer);
     private void OpenCareer_Click(object sender,RoutedEventArgs e)=>Guard(_vm.Refresh);
     private void AddCharacter_Click(object sender,RoutedEventArgs e)=>Guard(_vm.AddCharacter);
     private async void ProcessMatch_Click(object sender,RoutedEventArgs e){try{_vm.ProcessMatch();if(_vm.HasActiveInterview){_vm.MarkActiveInterviewRead();Navigation.SelectedIndex=9;}await _vm.RunAutomaticGenerationAsync();}catch(Exception ex){MessageBox.Show(ex.Message,"Touchline",MessageBoxButton.OK,MessageBoxImage.Warning);}}
+    private void OpenUp_Click(object sender,RoutedEventArgs e){try{if(_vm.ChooseRecovery("open_up"))Navigation.SelectedIndex=7;}catch(Exception ex){MessageBox.Show(ex.Message,"Touchline",MessageBoxButton.OK,MessageBoxImage.Warning);}}
+    private void RecoveryDay_Click(object sender,RoutedEventArgs e)=>Guard(()=>_vm.ChooseRecovery("recover"));
+    private void TrainingReset_Click(object sender,RoutedEventArgs e)=>Guard(()=>_vm.ChooseRecovery("training"));
+    private void EditMatch_Click(object sender,RoutedEventArgs e)=>Guard(_vm.EditSelectedMatch);
+    private void NewManualMatch_Click(object sender,RoutedEventArgs e)=>_vm.StartNewManualMatch();
+    private void CancelMatchEdit_Click(object sender,RoutedEventArgs e)=>_vm.CancelMatchEdit();
+    private void DeleteMatch_Click(object sender,RoutedEventArgs e){if(_vm.SelectedLoggedMatch is null){MessageBox.Show("Select a logged match first.","Touchline");return;}if(MessageBox.Show($"Delete the {_vm.SelectedLoggedMatch.Input.TeamScore}-{_vm.SelectedLoggedMatch.Input.OpponentScore} match against {_vm.SelectedLoggedMatch.Input.Opponent} and its generated world activity?","Delete match",MessageBoxButton.YesNo,MessageBoxImage.Warning)==MessageBoxResult.Yes)Guard(_vm.DeleteSelectedMatch);}
     private async void SendMessage_Click(object sender,RoutedEventArgs e){try{await _vm.SendMessageAsync();}catch(Exception ex){MessageBox.Show(ex.Message,"Touchline",MessageBoxButton.OK,MessageBoxImage.Warning);}}
-    private async void RecordPress_Click(object sender,RoutedEventArgs e){try{await _vm.RecordPressAsync();}catch(Exception ex){MessageBox.Show(ex.Message,"Post-match interview",MessageBoxButton.OK,MessageBoxImage.Warning);}}
+    private async void RecordPress_Click(object sender,RoutedEventArgs e){try{await _vm.RecordPressAsync();await _vm.RunAutomaticGenerationAsync();}catch(Exception ex){MessageBox.Show(ex.Message,"Post-match interview",MessageBoxButton.OK,MessageBoxImage.Warning);}}
     private void DeclineInterview_Click(object sender,RoutedEventArgs e)=>Guard(_vm.DeclineInterview);
     private async void SaveSettings_Click(object sender,RoutedEventArgs e){Guard(()=>_vm.SaveSettings(ApiKeyBox.Password));RestartFifaWatcher();await _vm.RunAutomaticGenerationAsync();}
     private void Backup_Click(object sender,RoutedEventArgs e){var dialog=new SaveFileDialog{Filter="Touchline backup (*.db)|*.db",FileName=$"touchline-backup-{DateTime.Now:yyyyMMdd-HHmm}.db"};if(dialog.ShowDialog()==true)Guard(()=>_vm.Backup(dialog.FileName));}
@@ -60,14 +68,15 @@ public partial class MainWindow : Window
         finally{_fifaScanBusy=false;if(_fifaRescanRequested){var nextAutomatic=!_fifaManualRescanRequested;_fifaRescanRequested=false;_fifaManualRescanRequested=false;if(!nextAutomatic||_vm.AutoFifaWatch)_ = Dispatcher.InvokeAsync(async()=>await ScanFifaAsync(nextAutomatic));}}
     }
     private void ReviewFifaMatch_Click(object sender,RoutedEventArgs e)=>Navigation.SelectedIndex=3;
-    private void OpenSelectedReview_Click(object sender,RoutedEventArgs e)=>Guard(()=>{_vm.PopulatePendingMatchForReview();Navigation.SelectedIndex=5;});
+    private void OpenSelectedReview_Click(object sender,RoutedEventArgs e)=>Guard(()=>{_vm.PopulatePendingMatchForReview();_openingFifaReview=true;Navigation.SelectedIndex=5;});
     private void DismissSelectedReview_Click(object sender,RoutedEventArgs e){if(MessageBox.Show("Dismiss this detected match? It will not be offered again.","Dismiss match",MessageBoxButton.YesNo,MessageBoxImage.Question)==MessageBoxResult.Yes)Guard(_vm.DismissSelectedMatchReview);}
     private void TalkTeammate_Click(object sender,RoutedEventArgs e){if(_vm.PrepareConversation(CareerCompanion.Core.Domain.CharacterType.Teammate,CareerCompanion.Core.Domain.SceneType.PreMatch))Navigation.SelectedIndex=7;else MessageBox.Show("No active teammate is available.","Touchline");}
     private void TalkManager_Click(object sender,RoutedEventArgs e){if(_vm.PrepareConversation(CareerCompanion.Core.Domain.CharacterType.Manager,CareerCompanion.Core.Domain.SceneType.ManagerOffice))Navigation.SelectedIndex=7;else MessageBox.Show("Add a manager character first.","Touchline");}
     private void TalkAgent_Click(object sender,RoutedEventArgs e){if(_vm.PrepareAgentConversation())Navigation.SelectedIndex=7;else MessageBox.Show("No agent is available in this FIFA career.","Touchline");}
     private void OpenPress_Click(object sender,RoutedEventArgs e){_vm.MarkActiveInterviewRead();Navigation.SelectedIndex=9;}
     private void MarkWorldRead_Click(object sender,RoutedEventArgs e)=>_vm.MarkAllNotificationsRead();
-    private void OpenWorldUpdate_Click(object sender,RoutedEventArgs e)=>Guard(()=>{var action=_vm.OpenSelectedNotification();Navigation.SelectedIndex=action switch{"Review"=>3,"Messages"=>7,"Press"=>9,"News"=>10,"Social"=>11,"Timeline"=>12,_=>0};});
+    private void ClearWorldRead_Click(object sender,RoutedEventArgs e)=>Guard(_vm.ClearReadNotifications);
+    private void OpenWorldUpdate_Click(object sender,RoutedEventArgs e)=>Guard(()=>{var action=_vm.OpenSelectedNotification();Navigation.SelectedIndex=action switch{"Home"=>0,"PreMatch"=>2,"Review"=>3,"Squad"=>6,"Messages"=>7,"Press"=>9,"News"=>10,"Social"=>11,"Timeline"=>12,_=>0};});
     private void RestartFifaWatcher()
     {
         _fifaWatcher?.Dispose();_fifaWatcher=null;if(!_vm.AutoFifaWatch||!Directory.Exists(_vm.FifaSettingsDirectory))return;

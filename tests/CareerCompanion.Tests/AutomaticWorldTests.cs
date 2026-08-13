@@ -36,5 +36,25 @@ public sealed class AutomaticWorldTests : IDisposable
         var db=NewDb();var career=db.CreateCareer("Save","Player","",20,"Club","League","2017/18","CM",8,"2017-09-01");var mate=db.AddCharacter(career,"Mate",24,"","Club","ST","Squad member",CharacterType.Teammate);var result=new CareerService(db).ProcessMatch(career,new("2017-09-02","Final","Other",true,3,0,true,90,3,0,9.5,false,false,false,false,""));new AutomaticWorldService(db).ApplyMatch(result,true,false,false,false,false);Assert.NotEmpty(db.GetPendingGenerationJobs(career,"automatic_reaction_llm",20));var generated=await new AutomaticDialogueService(db,new ReactionLlm()).ProcessPendingAsync(career,"routine","premium",true,20);Assert.True(generated.Completed>0);Assert.Equal("That was a massive performance. Keep setting the standard.",db.GetMessages(career,mate).Last().Content);Assert.Contains(db.GetNotifications(career),x=>x.Title=="Mate"&&x.Body.StartsWith("That was a massive"));Assert.Empty(db.GetPendingGenerationJobs(career,"automatic_reaction_llm",20));
     }
 
+    [Fact] public void Pre_match_briefing_creates_scouting_and_proactive_messages_once()
+    {
+        var db=NewDb();var career=db.CreateCareer("Save","Player","",20,"Club","League","2017/18","CM",8,"2017-09-01");var mate=db.AddCharacter(career,"Mate",24,"","Club","ST","Squad member",CharacterType.Teammate);var manager=db.AddCharacter(career,"Boss",45,"","Club","Manager","Manager",CharacterType.Manager);db.UpsertFixture(career,"FIFA 18 Save","fixture-1","2017-09-03","League","Rivals",false,90,"FIFA preview","fp");var fixture=db.GetFixtures(career).Single();var scout=new CareerCompanion.Core.Providers.Fifa18.Fifa18OpponentScout("Rivals","Other Boss","Away Ground",true,[new("Threat","ST",88)],"FIFA save squad snapshot");var service=new AutomaticWorldService(db);var first=service.ApplyPreMatch(career,fixture,scout);var second=service.ApplyPreMatch(career,fixture,scout);Assert.True(first>=3);Assert.Equal(0,second);Assert.NotEmpty(db.GetMessages(career,mate));Assert.NotEmpty(db.GetMessages(career,manager));Assert.Contains(db.GetEvents(career),x=>x.Type=="PRE_MATCH_BRIEFING");
+    }
+
+    [Fact] public void Routine_loss_hurts_without_forcing_a_crisis_scene()
+    {
+        var db=NewDb();var career=db.CreateCareer("Save","Player","",20,"Club","League","2017/18","CM",8,"2017-09-01");var result=new CareerService(db).ProcessMatch(career,new("2017-09-02","League","Other",true,0,1,true,90,0,0,6.5,false,false,false,false,""));var psychology=new PlayerPsychologyService(db).ApplyMatch(result,true,true);Assert.Equal("disappointed",psychology.State.Mood);Assert.False(psychology.State.NeedsSupport);Assert.Equal(0,psychology.SupportMessages);Assert.True(psychology.State.Confidence<55);Assert.True(psychology.State.Pressure>25);
+    }
+
+    [Fact] public void Devastating_loss_triggers_private_relationship_aware_support()
+    {
+        var db=NewDb();var career=db.CreateCareer("Save","Player","",20,"Club","League","2017/18","ST",9,"2017-09-01");var agent=db.AddCharacter(career,"Agent",40,"","","Agent","Representative",CharacterType.Agent);var mate=db.AddCharacter(career,"Close Mate",24,"","Club","CM","Squad member",CharacterType.Teammate);db.SaveRelationship(new(mate,Score:35,Trust:40,Friendliness:35,Familiarity:30));var result=new CareerService(db).ProcessMatch(career,new("2017-09-02","Cup Final","Rivals",true,0,1,true,90,0,0,4.5,false,false,false,true,"",null,true,true));var psychology=new PlayerPsychologyService(db).ApplyMatch(result,true,true);Assert.True(psychology.State.NeedsSupport);Assert.True(psychology.Severity>=22);Assert.Equal(2,psychology.SupportMessages);Assert.Contains(db.GetMessages(career,agent),x=>x.Content.Contains("Do not sit with this alone"));Assert.NotEmpty(db.GetMessages(career,mate));Assert.Contains(db.GetEvents(career),x=>x.Type=="PLAYER_EMOTIONAL_STATE"&&x.Classification==FactClassification.SimulatedInterpretation);
+    }
+
+    [Fact] public void Recovery_choice_is_persistent_and_only_available_once_per_match()
+    {
+        var db=NewDb();var career=db.CreateCareer("Save","Player","",20,"Club","League","2017/18","ST",9,"2017-09-01");var agent=db.AddCharacter(career,"Agent",40,"","","Agent","Representative",CharacterType.Agent);var result=new CareerService(db).ProcessMatch(career,new("2017-09-02","Final","Rivals",true,0,2,true,90,0,0,4.5,false,false,false,true,"",null,false,true));new PlayerPsychologyService(db).ApplyMatch(result,true,true);var before=db.GetPlayerState(career);var first=new PlayerPsychologyService(db).ChooseRecovery(career,"open_up");var second=new PlayerPsychologyService(db).ChooseRecovery(career,"training");Assert.True(first.Applied);Assert.Equal(agent,first.SupporterId);Assert.True(first.State.Isolation<before.Isolation);Assert.False(second.Applied);Assert.Equal(first.State,new Database(Path.Combine(_dir,"world.db")).GetPlayerState(career));
+    }
+
     public void Dispose(){try{Directory.Delete(_dir,true);}catch{}}
 }

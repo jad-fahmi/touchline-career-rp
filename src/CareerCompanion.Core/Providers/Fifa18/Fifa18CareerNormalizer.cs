@@ -54,6 +54,7 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         var startYear=careerStartYear+seasonNumber-1;
         var squad = NormalizeSquad(data, clubId, playerId, clubName, careerDate);
         var nextFixture = DetectNextFixture(data, state, clubName, clubId);
+        var opponentScout = nextFixture is null ? null : BuildOpponentScout(data,nextFixture.Opponent,clubId,careerDate);
         var manager=data.Table("managers").FirstOrDefault(r=>I(r,"teamid")==clubId);var managerName=JoinName(S(manager,"firstname"),S(manager,"surname"));
         var agentName=S(user,"agentname");
         var nationalTeamId=I(user,"nationalteamid");var nationalTeamName=nationalTeamId>0?S(data.Table("teams").FirstOrDefault(r=>I(r,"teamid")==nationalTeamId),"teamname"):"";
@@ -64,7 +65,17 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         return new(sourcePath,fingerprint,File.GetLastWriteTimeUtc(sourcePath),playerName,playerId,nationalityId,nationalityName,age,
             clubName,clubId,leagueId,leagueName,$"{startYear}/{(startYear+1)%100:00}",careerDate.ToString("yyyy-MM-dd"),
             PositionName(I(play,"position")),I(clubLink,"jerseynumber"),state,detected,squad,nextFixture,squadCount,diagnostics,
-            I(history,"overall"),I(clubLink,"form"),false,managerName,agentName,worldNews,false,nationalTeamId,nationalTeamName);
+            I(history,"overall"),I(clubLink,"form"),false,managerName,agentName,worldNews,false,nationalTeamId,nationalTeamName,opponentScout);
+    }
+
+    private Fifa18OpponentScout? BuildOpponentScout(Fifa18SaveData data,string opponentName,int clubId,DateTime careerDate)
+    {
+        var team=data.Table("teams").FirstOrDefault(r=>Same(S(r,"teamname"),opponentName));if(team is null)return null;
+        var teamId=I(team,"teamid");if(teamId<=0)return null;var manager=data.Table("managers").FirstOrDefault(r=>I(r,"teamid")==teamId);
+        var managerName=JoinName(S(manager,"firstname"),S(manager,"surname"));var stadium=S(data.Table("teamstadiumlinks").FirstOrDefault(r=>I(r,"teamid")==teamId),"stadiumname");
+        var club=data.Table("teams").FirstOrDefault(r=>I(r,"teamid")==clubId);var rival=I(club,"rivalteam",-1)==teamId||I(team,"rivalteam",-1)==clubId;
+        var keyPlayers=NormalizeSquad(data,teamId,-1,opponentName,careerDate).OrderByDescending(x=>x.Overall).ThenBy(x=>x.Name).Take(5).Select(x=>new Fifa18ScoutPlayer(x.Name,x.Position,x.Overall)).ToList();
+        var evidence=$"FIFA save squad snapshot for {opponentName}";return new(opponentName,managerName,stadium,rival,keyPlayers,evidence);
     }
 
     private IReadOnlyList<Fifa18SquadMember> NormalizeSquad(Fifa18SaveData data, int clubId, int careerPlayerId,

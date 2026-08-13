@@ -34,12 +34,18 @@ The app owns facts, state, chronology, relationships, memory, bounds, and event 
 - Automatic verified manager and agent creation, replacement reconciliation, FIFA Wire news import, international call-up detection, progression snapshots, and next-fixture detection
 - Quick squad/manager/journalist entry; structured profile editing and JSON import/export
 - Fast post-match form and deterministic win/loss/draw, scoring, card, streak, derby, major-fixture, heavy-defeat, and late-winner events
+- Match history with factual corrections, regenerated world effects, and guarded deletion for manually logged matches
 - Importance heuristics, selective reaction targeting, silence for minor events, and narrative emergence/decay
 - Multi-dimensional bounded relationships and validated model deltas
 - Per-character memory persistence, relevance ranking, and conservative compression architecture
 - Automatic incoming teammate and manager reactions, stateful characters, an unread World Updates inbox, and sender-aware navigation
+- Persistent player confidence, pressure, fatigue, isolation, and resilience, with context-sensitive emotional impact after defeats
+- Relationship-aware private support after severe losses, plus player-controlled recovery, training, and opening-up responses
 - Persistent automatic-generation jobs that show an immediate offline fallback and rewrite it with character-aware LLM dialogue when an API key is available
 - Scene-aware messages, manager and agent conversations, conditional multi-question post-match interviews with grounded AI follow-ups and offline fallback, and consequential public statements
+- Statement-aware manager and teammate follow-ups for accountable, team-first, boastful, critical, or referee-focused interview answers
+- Automatic pre-match manager briefings and teammate messages, with opposition key players, manager, venue, and rivalry context read from the FIFA save when available
+- Transfer coverage, agent guidance, and deduplicated squad arrival or departure storylines
 - Differentiated offline news outlets and social personas
 - Career dashboard, chronological timeline, settings, debug inspector, and DPAPI-protected API keys
 - Consistent SQLite export/restore backup
@@ -73,7 +79,11 @@ Teammates are reconciled using their stable FIFA player IDs. A later scan update
 
 The fixture view stores confirmed FIFA preview records, surfaces FIFA's own match briefing and availability notes, completes a matching played fixture, and supersedes the previous upcoming fixture when a newer preview appears. FIFA's complete future-season schedule is not present in the tested career save, so Touchline does not invent unconfirmed calendar entries.
 
-Each distinct save snapshot updates verified identity and career facts and records progression such as overall rating, club, position, and shirt-number changes. FIFA news appears as a dated FIFA Wire feed. Important matches can create incoming teammate or manager messages, press duties, news, social reactions, memories, relationship changes, and persistent character mood. These world effects use the in-career date rather than the computer's current date.
+When the save exposes the opponent's current team records, the pre-match page also shows a grounded scouting card with the opposing manager, venue, rivalry flag, and highest-rated players. A new confirmed fixture can trigger one proactive manager briefing and one teammate message. These updates are deduplicated by fixture, so repeated save scans do not create spam.
+
+Each distinct save snapshot updates verified identity and career facts and records progression such as overall rating, club, position, and shirt-number changes. Verified transfers create a career event, coverage, and agent guidance. Later squad snapshots detect arrivals and departures without treating the initial full-squad import as a transfer story. FIFA news appears as a dated FIFA Wire feed. Important matches can create incoming teammate or manager messages, press duties, news, social reactions, memories, relationship changes, and persistent character mood. Interview wording now affects relationship changes and can prompt private reactions from the manager or dressing room. These world effects use the in-career date rather than the computer's current date.
+
+The home dashboard also maintains the player's private mental state. A routine defeat can leave the player disappointed without creating a dramatic scene. Finals, derbies, heavy defeats, losing streaks, poor personal ratings, red cards, and missed penalties apply greater pressure and can lower confidence or increase isolation. When the accumulated state becomes serious, a trusted teammate, manager, or agent can check in privately. The player can open up, take a recovery day, or reset through training once after a difficult match. Private emotional state informs private dialogue but is never treated as a public FIFA fact or exposed to journalists automatically.
 
 Save files are opened read-only after their size and timestamp settle. Touchline writes only to its own SQLite database. Each imported FIFA event has a stable provider key and a source fingerprint, so rescanning the same result does not create a duplicate. Keep using FIFA's normal save and backup practices; no third-party tool can guarantee recovery from a corrupted game save.
 
@@ -118,7 +128,13 @@ The Windows executable built by the repo is:
 src\CareerCompanion.App\bin\Release\net9.0-windows\CareerCompanion.App.exe
 ```
 
-If you want a self-contained publish under `artifacts\win-x64`, add a Windows runtime identifier to the project or restore for `win-x64` before publishing.
+Create a self-contained Windows build with:
+
+```powershell
+dotnet publish src/CareerCompanion.App/CareerCompanion.App.csproj -p:PublishProfile=Windows-x64
+```
+
+The ready-to-run executable is written to `artifacts\win-x64\CareerCompanion.App.exe`. The repository now restores the `win-x64` runtime target as part of the normal project restore.
 
 The simulator accepts a match count and optional output database path. It generates a repeatable career containing varied outcomes, goals, a red card, derbies, and cup fixtures, then reports event/media volume for spam and narrative inspection. `--probe-fifa18` parses and prints a save snapshot without importing it or changing the source file.
 
@@ -161,8 +177,8 @@ It does not attach to `FIFA18.exe`, inject code, automate gameplay, write game d
 
 ## Roadmap
 
-- **Current:** automatic FIFA 18 synchronization, safe match import, international call-ups, world updates, incoming character reactions, interviews, media, and progression tracking
-- **Next:** deeper narratives and verified award, trophy, and transfer-detail events
-- **Later:** opponent scouting and richer competition context from additional validated save facts
+- **Current:** automatic FIFA 18 synchronization, safe match import, editable manual history, international call-ups, opponent scouting, transfer and squad-change stories, proactive briefings, consequential interviews, media, and progression tracking
+- **Next:** verified awards, trophy changes, richer competition context, and longer-running narrative arcs
+- **Later:** additional save-format validation across leagues, seasons, mods, and title updates
 
 The best next step is to use the current build through a real 10 to 20 match run, inspect reaction volume and chronology in Debug, and tune importance and character profiles from observed play.

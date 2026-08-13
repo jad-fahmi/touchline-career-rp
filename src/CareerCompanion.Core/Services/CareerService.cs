@@ -27,6 +27,17 @@ public sealed class CareerService(Database db)
         return new(match, detected, reactions, narratives);
     }
 
+    public MatchProcessingResult UpdateMatch(long careerId,long matchId,MatchInput input)
+    {
+        _=db.GetMatch(careerId,matchId);db.ClearGeneratedMatchWorld(careerId,matchId);db.UpdateMatch(careerId,matchId,input);
+        var match=db.GetMatch(careerId,matchId);var prior=db.GetMatches(careerId,500).Where(x=>x.Id!=matchId&&string.CompareOrdinal(x.Input.Date,match.Input.Date)<=0).ToList();
+        var detected=_events.Detect(careerId,matchId,match.Input,prior).Select(e=>e with{Id=db.SaveEvent(e)}).ToList();
+        var chars=db.GetCharacters(careerId);var rels=chars.ToDictionary(x=>x.Id,x=>db.GetRelationship(x.Id));
+        var reactions=detected.SelectMany(e=>_reactions.Select(e,chars,rels)).DistinctBy(x=>(x.CharacterId,x.Channel)).ToList();
+        var narratives=UpdateNarratives(careerId,matchId,detected,prior.Append(match).OrderBy(x=>x.Input.Date).ToList());
+        db.Log("match",$"Corrected match {matchId}; events={detected.Count}; reactions={reactions.Count}");return new(match,detected,reactions,narratives);
+    }
+
     private IReadOnlyList<string> UpdateNarratives(long careerId,long matchId, IReadOnlyList<CareerEvent> events, IReadOnlyList<CareerMatch> matches)
     {
         var active = new List<string>();

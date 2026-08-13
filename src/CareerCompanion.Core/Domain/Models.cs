@@ -40,6 +40,9 @@ public sealed record Relationship(long CharacterId, int Score = 0, int Trust = 0
     int Friendliness = 0, int Rivalry = 0, int Tension = 0, int Familiarity = 0);
 public sealed record CharacterState(long CharacterId,string Mood="neutral",string Concerns="",string Ambitions="",
     int Satisfaction=50,string ReactionState="",DateTime UpdatedAt=default);
+public sealed record PlayerState(long CareerId,string Mood="steady",int Confidence=55,int Pressure=25,
+    int Fatigue=15,int Isolation=10,int Resilience=55,string LastTrigger="Career beginning",
+    bool NeedsSupport=false,DateTime UpdatedAt=default);
 
 public sealed record MatchInput(string Date, string Competition, string Opponent, bool IsHome,
     int TeamScore, int OpponentScore, bool Started, int Minutes, int Goals, int Assists,
