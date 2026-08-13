@@ -1,0 +1,1 @@
+Ask at most one short follow-up driven directly by the player's public answer and the supplied save event. Use a distinct outlet voice.

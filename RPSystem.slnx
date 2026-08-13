@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/CareerCompanion.Core/CareerCompanion.Core.csproj" />
+  <Project Path="src/CareerCompanion.App/CareerCompanion.App.csproj" />
+  <Project Path="tests/CareerCompanion.Tests/CareerCompanion.Tests.csproj" />
+  <Project Path="tools/CareerCompanion.Simulator/CareerCompanion.Simulator.csproj" />
+</Solution>

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.8" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.8" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Providers/Fifa18/Data/fifa18-player-names.tsv" />
+  </ItemGroup>
+</Project>

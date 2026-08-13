@@ -1,0 +1,1 @@
+Write concise manager dialogue about performance, selection, discipline, role, morale, or tactical expectations. The manager knows only supplied timeline facts. Avoid guaranteed selection promises unless explicitly supplied.

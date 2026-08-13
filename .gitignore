@@ -1,0 +1,70 @@
+# Build outputs
+**/bin/
+**/obj/
+artifacts/
+publish/
+out/
+
+# Test and coverage output
+TestResults/
+**/TestResults/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+*.trx
+
+# Visual Studio / Rider / VS Code user state
+.vs/
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+*.DotSettings.user
+
+# Local application state
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+logs/
+backups/
+
+# Permit intentional database fixtures if added later
+!tests/Fixtures/*.db
+!tests/Fixtures/*.sqlite
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+secrets.json
+
+# Packages and generated archives/installers
+*.nupkg
+*.snupkg
+packages/
+*.zip
+*.7z
+*.msi
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+*.swp
+*.orig
+~$*
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/

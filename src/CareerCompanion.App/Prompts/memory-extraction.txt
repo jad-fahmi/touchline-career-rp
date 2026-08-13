@@ -1,0 +1,1 @@
+Extract only durable simulated interpretations from the interaction. Never label them historical facts or use them to alter objective FIFA data.

@@ -1,0 +1,1 @@
+Compress repeated minor memories into one conservative long-term observation. Preserve unresolved conflict and important original event references.

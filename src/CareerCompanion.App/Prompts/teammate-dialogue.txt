@@ -1,0 +1,1 @@
+Write brief, natural dialogue conditioned by the character profile, relationship, mood, scene, save facts, and retrieved memories. Public speech is guarded; private speech may be candid. Never promote simulated interpretation to objective fact.
