@@ -22,6 +22,7 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         var player = data.Table("players").FirstOrDefault(r => I(r,"playerid") == playerId);
         var club = data.Table("teams").FirstOrDefault(r => I(r,"teamid") == clubId);
         var clubName = S(club,"teamname"); if (string.IsNullOrWhiteSpace(clubName)) clubName = $"FIFA Team #{clubId}";
+        var nationalTeamId=I(user,"nationalteamid");var nationalTeamName=nationalTeamId>0?S(data.Table("teams").FirstOrDefault(r=>I(r,"teamid")==nationalTeamId),"teamname"):"";
         var nationalityId=I(user,"nationalityid");var nation=data.Table("nations").FirstOrDefault(r=>I(r,"nationid")==nationalityId);
         var nationalityName=S(nation,"nationname");
         if(string.IsNullOrWhiteSpace(nationalityName))
@@ -38,14 +39,17 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         var startDate = I(calendar,"startdate");
         var seasonNumber = Math.Max(1,I(user,"seasoncount"));
         var history = data.Table("career_playasplayerhistory")
-            .Where(r => I(r,"userid") == userId).OrderByDescending(r => I(r,"season")).FirstOrDefault();
+            .Where(r => I(r,"userid") == userId && I(r,"teamid") == clubId).OrderByDescending(r => I(r,"season")).FirstOrDefault()
+            ?? data.Table("career_playasplayerhistory").Where(r => I(r,"userid") == userId).OrderByDescending(r => I(r,"season")).FirstOrDefault();
         var rating = data.Table("career_playermatchratinghistory")
             .Where(r => I(r,"playerid") == playerId).OrderByDescending(r => I(r,"date"))
             .ThenByDescending(r => I(r,"artificialkey")).FirstOrDefault();
         var clubLink = data.Table("teamplayerlinks").FirstOrDefault(r => I(r,"playerid") == playerId && I(r,"teamid") == clubId);
         var state = new Fifa18SyncState(playerId,clubId,currentDate,seasonNumber,I(history,"appearances"),I(history,"goals"),
             I(history,"assists"),I(history,"totalyellows"),I(history,"totalreds"),I(rating,"artificialkey"),I(rating,"date"));
-        var detected = DetectMatch(data, state, previous, playerName, clubName, clubId, rating, diagnostics);
+        var clubMatch = DetectMatch(data, state, previous, playerName, clubName, clubId, rating, diagnostics);
+        var internationalMatch = DetectInternationalMatch(data,state,playerId,nationalTeamId,nationalTeamName,diagnostics);
+        var detected = Latest(clubMatch,internationalMatch);
         var birthDateValue = I(player,"birthdate");
         var birthDate = birthDateValue > 0 ? new DateTime(1582,10,15).AddDays(birthDateValue) : new DateTime(1999,1,1);
         var careerDate = ParseFifaDate(currentDate) ?? DateTime.Today;
@@ -53,11 +57,10 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         var careerStartYear = (ParseFifaDate(startDate) ?? careerDate).Year;
         var startYear=careerStartYear+seasonNumber-1;
         var squad = NormalizeSquad(data, clubId, playerId, clubName, careerDate);
-        var nextFixture = DetectNextFixture(data, state, clubName, clubId);
+        var nextFixture = DetectNextFixture(data, state, clubName, clubId,nationalTeamId,nationalTeamName,internationalMatch);
         var opponentScout = nextFixture is null ? null : BuildOpponentScout(data,nextFixture.Opponent,clubId,careerDate);
         var manager=data.Table("managers").FirstOrDefault(r=>I(r,"teamid")==clubId);var managerName=JoinName(S(manager,"firstname"),S(manager,"surname"));
         var agentName=S(user,"agentname");
-        var nationalTeamId=I(user,"nationalteamid");var nationalTeamName=nationalTeamId>0?S(data.Table("teams").FirstOrDefault(r=>I(r,"teamid")==nationalTeamId),"teamname"):"";
         var worldNews=data.Table("career_news").Where(r=>I(r,"date")>0&&!string.IsNullOrWhiteSpace(S(r,"title")))
             .OrderByDescending(r=>I(r,"date")).Take(60).Select(r=>{var date=I(r,"date");var title=S(r,"title");var body=S(r,"body");var raw=$"{date}|{title}|{body}";var key=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();var importance=Math.Clamp(15+I(r,"importance")*14,15,85);return new Fifa18WorldNews(key,(ParseFifaDate(date)??careerDate).ToString("yyyy-MM-dd"),title,body,importance);}).ToList();
         var squadCount = squad.Count + 1;
@@ -110,14 +113,78 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
     }
 
     private static Fifa18DetectedFixture? DetectNextFixture(Fifa18SaveData data, Fifa18SyncState state,
-        string clubName, int clubId)
+        string clubName, int clubId,int nationalTeamId,string nationalTeamName,Fifa18DetectedMatch? internationalMatch)
     {
-        return data.Table("career_news")
+        var clubFixture=data.Table("career_news")
             .Where(r => I(r,"date") > state.LatestRatingDate &&
                         (state.CareerDate <= 0 || I(r,"date") <= state.CareerDate))
             .OrderByDescending(r => I(r,"date"))
             .Select(r => ParseFixturePreview(S(r,"title"),I(r,"date"),clubName,clubId,S(r,"body")))
             .FirstOrDefault(x => x is not null);
+        var nationalFixture=nationalTeamId<=0?null:data.Table("career_news")
+            .Where(r=>I(r,"teamid")==nationalTeamId&&I(r,"playerid")==state.PlayerId)
+            .OrderByDescending(r=>I(r,"date"))
+            .Select(r=>ParseInternationalFixture(S(r,"title"),S(r,"body"),I(r,"date"),nationalTeamId,nationalTeamName))
+            .FirstOrDefault(x=>x is not null && (internationalMatch is null || x.Date!=internationalMatch.Date));
+        return Latest(clubFixture,nationalFixture);
+    }
+
+    private static Fifa18DetectedMatch? DetectInternationalMatch(Fifa18SaveData data,Fifa18SyncState state,
+        int playerId,int nationalTeamId,string nationalTeamName,List<string> diagnostics)
+    {
+        if(nationalTeamId<=0||string.IsNullOrWhiteSpace(nationalTeamName))return null;
+        var articles=data.Table("career_news").Where(r=>I(r,"teamid")==nationalTeamId).OrderByDescending(r=>I(r,"date")).ToList();
+        var result=articles.FirstOrDefault(r=>I(r,"playerid")==playerId&&InternationalOutcome(S(r,"title"),S(r,"body"))!=0);
+        if(result is null)return null;
+        var date=I(result,"date");if(date<=state.LatestRatingDate)return null;
+        var outcome=InternationalOutcome(S(result,"title"),S(result,"body"));
+        var resultDate=ParseFifaDate(date)??DateTime.Today;var related=articles.Where(r=>ParseFifaDate(I(r,"date")) is { } articleDate&&articleDate<=resultDate&&articleDate>=resultDate.AddDays(-21)).ToList();
+        var opponent=related.Select(r=>InternationalOpponent(S(r,"title")+" "+S(r,"body"),nationalTeamName)).FirstOrDefault(x=>!string.IsNullOrWhiteSpace(x))??"Review opponent";
+        var competition=related.Select(r=>InternationalCompetition(S(r,"title"))).FirstOrDefault(x=>!string.IsNullOrWhiteSpace(x))??"International";
+        var raw=$"{date}|{S(result,"title")}|{S(result,"body")}";var hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw))).ToLowerInvariant()[..20];
+        diagnostics.Add($"International appearance detected for {nationalTeamName}. FIFA did not expose the exact score or player performance fields, so review is required.");
+        var evidence=$"FIFA national-team news: {S(result,"title")}. {S(result,"body").Trim()} Exact score, minutes, rating, goals, assists, cards, venue, and starter status require review.";
+        return new($"p{playerId}:national:{nationalTeamId}:news:{hash}",(ParseFifaDate(date)??DateTime.Today).ToString("yyyy-MM-dd"),competition,opponent,true,
+            0,0,true,0,0,0,0,false,false,88,evidence,true,false,"International",nationalTeamName,false);
+    }
+
+    private static Fifa18DetectedFixture? ParseInternationalFixture(string title,string body,int date,int teamId,string teamName)
+    {
+        if(InternationalOutcome(title,body)!=0)return null;
+        var opponent=InternationalOpponent(title+" "+body,teamName);if(string.IsNullOrWhiteSpace(opponent))return null;
+        var parsedDate=ParseFifaDate(date);if(parsedDate is null)return null;
+        var competition=InternationalCompetition(title);if(string.IsNullOrWhiteSpace(competition))competition="International";
+        return new($"national:{teamId}:fixture:{date}:{Normalize(opponent).ToLowerInvariant()}",parsedDate.Value.ToString("yyyy-MM-dd"),competition,opponent,true,76,
+            $"FIFA national-team news: {title}. {body.Trim()}","International",teamName);
+    }
+
+    private static int InternationalOutcome(string title,string body)
+    {
+        var text=title+" "+body;var appeared=ContainsAny(text,"international career","debut showing","international appearance","newly capped","international debut");
+        if(!appeared||ContainsAny(text,"prepares for","looming","eager to see"))return 0;
+        if(ContainsAny(text,"victory","winners","ran out worthy winners","won "))return 1;
+        if(ContainsAny(text,"defeat","lost ","losing debut"))return -1;
+        if(ContainsAny(text,"draw","stalemate"))return 2;
+        return 0;
+    }
+
+    private static string InternationalOpponent(string text,string teamName)
+    {
+        var patterns=new[]{@"\bsoon to face\s+(?<opponent>[^,.;\r\n]+)",@"\bface(?:s|d)?\s+(?<opponent>[^,.;\r\n]+)",@"\bagainst\s+(?<opponent>[^,.;\r\n]+)"};
+        foreach(var pattern in patterns){var m=Regex.Match(text,pattern,RegexOptions.IgnoreCase);if(m.Success){var value=Normalize(m.Groups["opponent"].Value);if(!Same(value,teamName))return value;}}
+        return "";
+    }
+
+    private static string InternationalCompetition(string title)
+    {
+        var m=Regex.Match(title,@"\bSquad for\s+(?<competition>.+)$",RegexOptions.IgnoreCase);return m.Success?Normalize(m.Groups["competition"].Value):"";
+    }
+
+    private static bool ContainsAny(string text,params string[] values)=>values.Any(x=>text.Contains(x,StringComparison.OrdinalIgnoreCase));
+    private static T? Latest<T>(T? a,T? b) where T:class
+    {
+        if(a is null)return b;if(b is null)return a;
+        var aDate=a switch{Fifa18DetectedMatch x=>x.Date,Fifa18DetectedFixture x=>x.Date,_=>""};var bDate=b switch{Fifa18DetectedMatch x=>x.Date,Fifa18DetectedFixture x=>x.Date,_=>""};return string.CompareOrdinal(aDate,bDate)>=0?a:b;
     }
 
     private static Fifa18DetectedMatch? DetectMatch(Fifa18SaveData data,Fifa18SyncState state,Fifa18SyncState? previous,

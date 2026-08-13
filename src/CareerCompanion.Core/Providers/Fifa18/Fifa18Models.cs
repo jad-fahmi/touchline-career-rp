@@ -33,11 +33,15 @@ public sealed record Fifa18DetectedMatch(
     int Confidence,
     string Evidence,
     bool RequiresReview,
-    bool StartedKnown = false)
+    bool StartedKnown = false,
+    string TeamContext = "Club",
+    string RepresentingTeam = "",
+    bool ScoreKnown = true)
 {
     public MatchInput ToMatchInput() => new(Date, Competition, Opponent, IsHome,
         TeamScore, OpponentScore, Started, Minutes, Goals, Assists, Rating,
-        YellowCard, RedCard, false, false, Evidence,StartedKnown:StartedKnown);
+        YellowCard, RedCard, false, false, Evidence,StartedKnown:StartedKnown,
+        TeamContext:TeamContext,RepresentingTeam:RepresentingTeam);
 }
 
 public sealed record Fifa18SquadMember(
@@ -58,7 +62,9 @@ public sealed record Fifa18DetectedFixture(
     string Opponent,
     bool IsHome,
     int Confidence,
-    string Evidence);
+    string Evidence,
+    string TeamContext = "Club",
+    string RepresentingTeam = "");
 
 public sealed record Fifa18WorldNews(string EventKey,string Date,string Title,string Body,int Importance);
 public sealed record Fifa18ScoutPlayer(string Name,string Position,int Overall);

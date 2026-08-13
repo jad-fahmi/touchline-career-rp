@@ -18,6 +18,13 @@ public sealed class CareerService(Database db)
         var matchId=!string.IsNullOrWhiteSpace(provider)&&!string.IsNullOrWhiteSpace(providerEventKey)?db.SaveProviderMatch(careerId,provider,providerEventKey,input).MatchId:db.SaveMatch(careerId,input);
         var match = db.GetMatch(careerId,matchId);prior=prior.Where(x=>x.Id!=matchId).ToList();
         var detected = _events.Detect(careerId, matchId, match.Input, prior).Select(e => e with { Id = db.SaveEvent(e) }).ToList();
+        foreach(var breakthrough in FootballRecordDetector.Detect(match,prior))
+        {
+            var summary=$"RECORD BROKEN: {breakthrough.Record.Name}. {breakthrough.Summary}";
+            var recordEvent=new CareerEvent(0,careerId,matchId,"FOOTBALL_RECORD_BROKEN",DateTime.TryParse(match.Input.Date,out var recordDate)?recordDate:DateTime.UtcNow,96,
+                "[]",System.Text.Json.JsonSerializer.Serialize(new{breakthrough.Record.Key,breakthrough.Record.Name,breakthrough.NewValue,breakthrough.Record.Benchmark,breakthrough.Record.Holder,breakthrough.Record.SourceUrl,breakthrough.Record.Evidence}),summary,FactClassification.HistoricalFact);
+            detected.Add(recordEvent with {Id=db.SaveEvent(recordEvent)});
+        }
         var chars = db.GetCharacters(careerId);
         var rels = chars.ToDictionary(x => x.Id, x => db.GetRelationship(x.Id));
         var reactions = detected.SelectMany(e => _reactions.Select(e, chars, rels)).DistinctBy(x => (x.CharacterId,x.Channel)).ToList();

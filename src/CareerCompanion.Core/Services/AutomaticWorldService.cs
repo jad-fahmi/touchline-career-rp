@@ -58,7 +58,22 @@ public sealed class AutomaticWorldService(Database db)
             var context=System.Text.Json.JsonSerializer.Serialize(new{automatic=true,eventId=evt.Id,classification=FactClassification.SimulatedInterpretation.ToString()});
             if(db.AddAutomaticReaction(career.Id,character.Id,evt.Id,scene,context,text,Math.Clamp(evt.Importance,30,75),Tone(evt),"automatic post-match reaction",character.Type==CharacterType.Manager?"Manager":"Message",character.Name,$"Messages:{character.Id}",target.Priority,dedupe,evt.Timestamp)){messages++;notices++;}
         }
+        if(result.Match.Input.TeamContext=="International")
+        {
+            var agent=characters.Values.FirstOrDefault(x=>x.Type==CharacterType.Agent&&IsActive(x));var international=result.Events.FirstOrDefault(x=>x.Type.StartsWith("INTERNATIONAL_",StringComparison.Ordinal));
+            if(agent is not null&&international is not null)
+            {
+                var text=international.Type=="INTERNATIONAL_DEBUT"?$"A senior debut for {result.Match.Input.RepresentingTeam} is a real career milestone. Take it in, then keep building on it.":$"Another cap for {result.Match.Input.RepresentingTeam}. International matches raise your profile, but your next club performance still matters.";
+                if(db.AddAutomaticReaction(career.Id,agent.Id,international.Id,SceneType.PrivateMessage,JsonSerializer.Serialize(new{automatic=true,eventId=international.Id}),text,70,35,"international career guidance","Message",agent.Name,$"Messages:{agent.Id}",82,$"international-agent:{result.Match.Id}:{agent.Id}",international.Timestamp)){messages++;notices++;}
+            }
+        }
         var top=result.Events.FirstOrDefault();if(newsCreated&&top is not null&&db.AddNotification(career.Id,"News","New coverage after "+result.Match.Input.Opponent,top.Summary,"News",top.Importance,$"news:{result.Match.Id}",top.Timestamp))notices++;
+        foreach(var record in result.Events.Where(x=>x.Type=="FOOTBALL_RECORD_BROKEN"))
+        {
+            if(db.AddNotification(career.Id,"Record","Football record broken",record.Summary,"Timeline",98,$"record:{record.Id}",record.Timestamp))notices++;
+            var agent=characters.Values.FirstOrDefault(x=>x.Type==CharacterType.Agent&&IsActive(x));
+            if(agent is not null&&db.AddAutomaticReaction(career.Id,agent.Id,record.Id,SceneType.PrivateMessage,JsonSerializer.Serialize(new{automatic=true,eventId=record.Id,record=true}),"That is not just a good performance. You have put your name into the record book. Take the moment in, then protect the standard you have set.",92,70,"football record reaction","Message",agent.Name,$"Messages:{agent.Id}",96,$"record-agent:{record.Id}:{agent.Id}",record.Timestamp)){messages++;notices++;}
+        }
         if(socialCreated&&top is not null&&db.AddNotification(career.Id,"Social","The football world is reacting",top.Summary,"Social",Math.Max(30,top.Importance-5),$"social:{result.Match.Id}",top.Timestamp))notices++;
         if(interviewCreated&&db.AddNotification(career.Id,"Interview","Post-match interview requested","The media wants to hear from you after "+result.Match.Input.Opponent+".","Press",80,$"interview:{result.Match.Id}",top?.Timestamp))notices++;
         if(top is not null){var engine=new CharacterStateEngine();var states=characters.Values.Where(x=>x.Type is CharacterType.Manager or CharacterType.Teammate).Where(IsActive).Select(character=>engine.AfterMatch(character,db.GetCharacterState(character.Id),result.Match,top)).ToList();db.SaveCharacterStatesOnce(career.Id,$"match-state:{career.Id}:{result.Match.Id}",states);}
@@ -103,7 +118,8 @@ public sealed class AutomaticWorldService(Database db)
 
     private static string Reaction(Character character,Career career,CareerMatch match,CareerEvent evt)
     {
-        var input=match.Input;if(character.Type==CharacterType.Manager)return evt.Type switch{"PLAYER_RED_CARD"=>"We need to talk about the sending-off. Discipline matters, and I expect a response.","PLAYER_HATTRICK"=>"Outstanding finishing today. Enjoy it, then prepare to meet that standard again.","LARGE_DEFEAT"=>"That result was not acceptable. We reset, work, and show a response in the next match.","PLAYER_BENCHED"=>"Keep working. Selection follows what I see in training and matches.",_=>input.TeamScore>input.OpponentScore?"Good result. Stay focused because the next match arrives quickly.":"Review your performance honestly. We need a stronger response next time."};
+        var input=match.Input;if(character.Type==CharacterType.Manager)return input.TeamContext=="International"?(input.TeamScore>input.OpponentScore?$"Congratulations on the result with {input.RepresentingTeam}. Recover properly and return ready for club duty.":$"International defeats hurt. Reset, recover, and bring your focus back to the club."):evt.Type switch{"PLAYER_RED_CARD"=>"We need to talk about the sending-off. Discipline matters, and I expect a response.","PLAYER_HATTRICK"=>"Outstanding finishing today. Enjoy it, then prepare to meet that standard again.","LARGE_DEFEAT"=>"That result was not acceptable. We reset, work, and show a response in the next match.","PLAYER_BENCHED"=>"Keep working. Selection follows what I see in training and matches.",_=>input.TeamScore>input.OpponentScore?"Good result. Stay focused because the next match arrives quickly.":"Review your performance honestly. We need a stronger response next time."};
+        if(input.TeamContext=="International")return input.TeamScore>input.OpponentScore?$"Congratulations on the win with {input.RepresentingTeam}. That is a special one for you.":$"Tough result with {input.RepresentingTeam}. We are here when you get back.";
         var seed=unchecked(character.Id*397+evt.Id);return evt.Type switch{"PLAYER_HATTRICK"=>seed%2==0?$"Unreal performance, {career.PlayerName}. You were unplayable today.":"Three goals. Save some for the rest of us next time.","PLAYER_RED_CARD"=>"That was a costly moment. We need you on the pitch, not watching from the tunnel.","LARGE_DEFEAT"=>"Tough one. No excuses, but we stay together and respond.","LATE_WINNER"=>"I still cannot believe that finish. The dressing room erupted.",_=>input.TeamScore>input.OpponentScore?"Big result today. Well played.":input.TeamScore<input.OpponentScore?"That one hurts. We have to respond together.":"A point, but it feels like there was more there for us."};
     }
     private static int Tone(CareerEvent evt)=>evt.Type.Contains("LOST")||evt.Type.Contains("RED")||evt.Type.Contains("DEFEAT")?-35:35;

@@ -11,11 +11,11 @@ public sealed class MatchReviewView
     public Fifa18DetectedMatch Match { get; }
     public Fifa18ParsedCareer Snapshot { get; }
     public long Id => Review.Id;
-    public string Score => $"{Match.TeamScore} - {Match.OpponentScore}";
+    public string Score => Match.ScoreKnown?$"{Match.TeamScore} - {Match.OpponentScore}":"SCORE NEEDED";
     public string Opponent => Match.Opponent;
     public string Date => Match.Date;
     public string Competition => Match.Competition;
-    public string Venue => Match.IsHome ? "HOME" : "AWAY";
+    public string Venue => $"{(Match.IsHome ? "HOME" : "AWAY")} | {Match.TeamContext.ToUpperInvariant()}";
     public string Confidence => $"{Match.Confidence}% CONFIDENCE";
     public string Evidence => Match.Evidence;
     public string Captured => $"Detected {Review.CapturedAt.ToLocalTime():dd MMM yyyy, HH:mm}";

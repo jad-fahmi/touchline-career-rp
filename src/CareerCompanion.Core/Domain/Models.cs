@@ -17,6 +17,7 @@ public sealed record Character(
     string PersonalityJson, string CommunicationJson, string HistoricalNotes,
     bool IsPublic = false)
 {
+    public override string ToString() => Name;
     public CharacterProfile Profile => new(
         JsonSerializer.Deserialize<Personality>(PersonalityJson) ?? Personality.Balanced,
         JsonSerializer.Deserialize<CommunicationStyle>(CommunicationJson) ?? CommunicationStyle.Balanced);
@@ -48,12 +49,12 @@ public sealed record MatchInput(string Date, string Competition, string Opponent
     int TeamScore, int OpponentScore, bool Started, int Minutes, int Goals, int Assists,
     double Rating, bool YellowCard, bool RedCard, bool PenaltyScored, bool PenaltyMissed,
     string Notes, string? NextOpponent = null, bool IsDerby = false, bool IsMajorFixture = false,
-    bool StartedKnown = true);
+    bool StartedKnown = true, string TeamContext = "Club", string RepresentingTeam = "");
 
 public sealed record CareerMatch(long Id, long CareerId, MatchInput Input, string Result, DateTime CreatedAt);
 public sealed record CareerFixture(long Id, long CareerId, string Provider, string EventKey, string Date,
     string Competition, string Opponent, bool IsHome, string Status, int Confidence, string Evidence,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt, string TeamContext = "Club", string RepresentingTeam = "");
 public sealed record MatchReview(long Id, long CareerId, string Provider, string EventKey, string SourcePath,
     string FileFingerprint, DateTime CapturedAt, string MatchJson, string SnapshotJson, string Status,
     DateTime CreatedAt, DateTime UpdatedAt);

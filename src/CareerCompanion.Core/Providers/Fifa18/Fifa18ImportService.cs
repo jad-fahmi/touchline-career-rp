@@ -30,7 +30,7 @@ public sealed class Fifa18ImportService(Database db)
         if(parsed.NextFixture is { } fixture)
         {
             db.UpsertFixture(careerId,ProviderName,fixture.EventKey,fixture.Date,fixture.Competition,fixture.Opponent,
-                fixture.IsHome,fixture.Confidence,fixture.Evidence,parsed.FileFingerprint);
+                fixture.IsHome,fixture.Confidence,fixture.Evidence,parsed.FileFingerprint,fixture.TeamContext,fixture.RepresentingTeam);
             db.SetSetting($"career:{careerId}:next",fixture.Opponent);
             db.SetSetting($"career:{careerId}:opponent_scout",JsonSerializer.Serialize(parsed.OpponentScout));
             storedFixture=db.GetFixtures(careerId).First(x=>x.EventKey==fixture.EventKey);

@@ -13,6 +13,33 @@ if(args.Length>0&&args[0]=="--probe-fifa18")
     return;
 }
 
+if(args.Length>0&&args[0]=="--probe-fifa18-context")
+{
+    var path=args.Length>1?Path.GetFullPath(args[1]):new Fifa18SaveLocator().FindLatestCareer();
+    if(path is null)throw new FileNotFoundException("No FIFA 18 Career save found.");
+    var (data,_)=await new Fifa18SaveParser().ParseFileAsync(path);
+    var user=data.Table("career_users").First(x=>Convert.ToInt64(x["usertype"])==2);
+    var userId=Convert.ToInt32(user["userid"]);var playerId=Convert.ToInt32(data.Table("career_playasplayer").First(x=>Convert.ToInt32(x["userid"])==userId)["playerid"]);
+    foreach(var table in new[]{"career_users","career_playasplayerhistory","career_playermatchratinghistory","career_playerlastmatchhistory"})
+    {
+        Console.WriteLine($"\n[{table}]");
+        foreach(var row in data.Table(table).Where(row=>!row.TryGetValue("playerid",out var p)||Convert.ToInt32(p)==playerId))
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(row));
+    }
+    Console.WriteLine("\n[relevant career_news]");
+    foreach(var row in data.Table("career_news").Where(row=>Convert.ToInt32(row.GetValueOrDefault("date",0))>=20170826&&
+        (Convert.ToInt32(row.GetValueOrDefault("teamid",-1))==Convert.ToInt32(user["nationalteamid"])||
+         (Convert.ToInt32(row.GetValueOrDefault("date",0))==20170901&&
+          (Convert.ToString(row.GetValueOrDefault("title",""))!.Contains("Portugal",StringComparison.OrdinalIgnoreCase)||
+           Convert.ToString(row.GetValueOrDefault("title",""))!.Contains("England",StringComparison.OrdinalIgnoreCase)||
+           Convert.ToString(row.GetValueOrDefault("body",""))!.Contains("Portugal",StringComparison.OrdinalIgnoreCase)||
+           Convert.ToString(row.GetValueOrDefault("body",""))!.Contains("England",StringComparison.OrdinalIgnoreCase)))||
+         Convert.ToString(row.GetValueOrDefault("title",""))!.Contains("Oliveira",StringComparison.OrdinalIgnoreCase)||
+         Convert.ToString(row.GetValueOrDefault("body",""))!.Contains("Oliveira",StringComparison.OrdinalIgnoreCase))))
+        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(row));
+    return;
+}
+
 var count=args.Length>0&&int.TryParse(args[0],out var n)?Math.Clamp(n,1,500):20;
 var destination=args.Length>1?Path.GetFullPath(args[1]):Path.Combine(Path.GetTempPath(),$"touchline-simulation-{DateTime.Now:yyyyMMdd-HHmmss}.db");
 var db=new Database(destination);db.Migrate();var career=db.CreateCareer("Simulation Run","Test Player","Test",20,"Simulation FC","Test League","2017/18","ST",9);db.AddCharacter(career,"Outspoken Teammate",25,"Test","Simulation FC","CM","Starter",CharacterType.Teammate,new(70,80,60,65,45,35,75,60,35,65,55,70),CommunicationStyle.Balanced);db.AddCharacter(career,"Quiet Teammate",22,"Test","Simulation FC","CB","Rotation",CharacterType.Teammate,new(45,60,20,20,20,70,55,30,70,25,75,80),new("very brief",40,5,10,20,50,45,5));db.AddCharacter(career,"Test Manager",52,"Test","Simulation FC","Manager","Manager",CharacterType.Manager);

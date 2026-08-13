@@ -15,7 +15,13 @@ public sealed class EventEngine
 
         var result = match.TeamScore.CompareTo(match.OpponentScore);
         Add(result > 0 ? "MATCH_WON" : result < 0 ? "MATCH_LOST" : "MATCH_DRAWN",
-            BaseImportance(match), $"{match.Competition}: {(match.IsHome ? "Home" : "Away")} vs {match.Opponent}, {match.TeamScore}-{match.OpponentScore}.");
+            BaseImportance(match), $"{match.Competition}: {match.RepresentingTeam} {(match.IsHome ? "vs" : "at")} {match.Opponent}, {match.TeamScore}-{match.OpponentScore}.");
+        if(match.TeamContext=="International")
+        {
+            var debut=!previousMatches.Any(x=>x.Input.TeamContext=="International");
+            Add(debut?"INTERNATIONAL_DEBUT":"INTERNATIONAL_APPEARANCE",debut?88:48,debut?$"Made a senior international debut for {match.RepresentingTeam} against {match.Opponent}.":$"Represented {match.RepresentingTeam} against {match.Opponent}.");
+            if(match.Goals>0)Add("INTERNATIONAL_GOAL",Math.Min(95,65+match.Goals*8),$"Scored {match.Goals} international goal(s) for {match.RepresentingTeam}.");
+        }
         if (match.Goals == 1) Add("PLAYER_SCORED", 35, $"Scored against {match.Opponent}.");
         if (match.Goals == 2) Add("PLAYER_BRACE", 58, $"Scored twice against {match.Opponent}.");
         if (match.Goals >= 3) Add("PLAYER_HATTRICK", 82 + Math.Min(10, match.Goals - 3), $"Scored {match.Goals} goals against {match.Opponent}.");
@@ -38,5 +44,7 @@ public sealed class EventEngine
     }
 
     private static int BaseImportance(MatchInput m) => Math.Clamp(25 + (m.IsDerby ? 20 : 0) +
-        (m.IsMajorFixture ? 25 : 0) + (m.Competition.Contains("Final", StringComparison.OrdinalIgnoreCase) ? 30 : 0), 10, 95);
+        (m.IsMajorFixture ? 25 : 0) + (m.TeamContext=="International"?15:0) +
+        (m.Competition.Contains("World Cup",StringComparison.OrdinalIgnoreCase)||m.Competition.Contains("Euro",StringComparison.OrdinalIgnoreCase)?15:0) +
+        (m.Competition.Contains("Final", StringComparison.OrdinalIgnoreCase) ? 30 : 0), 10, 95);
 }
