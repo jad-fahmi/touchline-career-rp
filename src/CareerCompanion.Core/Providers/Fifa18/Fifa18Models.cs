@@ -32,11 +32,12 @@ public sealed record Fifa18DetectedMatch(
     bool RedCard,
     int Confidence,
     string Evidence,
-    bool RequiresReview)
+    bool RequiresReview,
+    bool StartedKnown = false)
 {
     public MatchInput ToMatchInput() => new(Date, Competition, Opponent, IsHome,
         TeamScore, OpponentScore, Started, Minutes, Goals, Assists, Rating,
-        YellowCard, RedCard, false, false, Evidence);
+        YellowCard, RedCard, false, false, Evidence,StartedKnown:StartedKnown);
 }
 
 public sealed record Fifa18SquadMember(
@@ -58,6 +59,8 @@ public sealed record Fifa18DetectedFixture(
     bool IsHome,
     int Confidence,
     string Evidence);
+
+public sealed record Fifa18WorldNews(string EventKey,string Date,string Title,string Body,int Importance);
 
 public sealed record Fifa18ParsedCareer(
     string SourcePath,
@@ -81,7 +84,16 @@ public sealed record Fifa18ParsedCareer(
     IReadOnlyList<Fifa18SquadMember> Squad,
     Fifa18DetectedFixture? NextFixture,
     int ParsedSquadMembers,
-    IReadOnlyList<string> Diagnostics);
+    IReadOnlyList<string> Diagnostics,
+    int PlayerOverall = 0,
+    int PlayerForm = 0,
+    bool PlayerInjured = false,
+    string ManagerName = "",
+    string AgentName = "",
+    IReadOnlyList<Fifa18WorldNews>? WorldNews = null,
+    bool PlayerInjuryKnown = false,
+    int NationalTeamId = -1,
+    string NationalTeamName = "");
 
-public enum Fifa18ScanDisposition { MatchDetected, NoNewMatch, CareerMismatch, NoCareerSelected }
+public enum Fifa18ScanDisposition { MatchDetected, MatchAutoImported, NoNewMatch, CareerMismatch, NoCareerSelected }
 public sealed record Fifa18ScanResult(Fifa18ScanDisposition Disposition, Fifa18ParsedCareer Parsed, string Message);

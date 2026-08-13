@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace CareerCompanion.Core.Domain;
 
 public enum FactClassification { HistoricalFact, SaveFact, SimulatedInterpretation }
-public enum CharacterType { Teammate, Manager, Opponent, Journalist, Pundit, MediaPersonality, Other }
+public enum CharacterType { Teammate, Manager, Agent, Opponent, Journalist, Pundit, MediaPersonality, Other }
 public enum SceneType { PrivateMessage, DressingRoom, TrainingGround, PostMatch, PreMatch, PressConference, ManagerOffice, TransferDiscussion, Celebration, Conflict, Casual }
 
 public sealed record Career(
@@ -38,16 +38,31 @@ public sealed record CharacterProfile(Personality Personality, CommunicationStyl
 
 public sealed record Relationship(long CharacterId, int Score = 0, int Trust = 0, int Respect = 0,
     int Friendliness = 0, int Rivalry = 0, int Tension = 0, int Familiarity = 0);
+public sealed record CharacterState(long CharacterId,string Mood="neutral",string Concerns="",string Ambitions="",
+    int Satisfaction=50,string ReactionState="",DateTime UpdatedAt=default);
 
 public sealed record MatchInput(string Date, string Competition, string Opponent, bool IsHome,
     int TeamScore, int OpponentScore, bool Started, int Minutes, int Goals, int Assists,
     double Rating, bool YellowCard, bool RedCard, bool PenaltyScored, bool PenaltyMissed,
-    string Notes, string? NextOpponent = null, bool IsDerby = false, bool IsMajorFixture = false);
+    string Notes, string? NextOpponent = null, bool IsDerby = false, bool IsMajorFixture = false,
+    bool StartedKnown = true);
 
 public sealed record CareerMatch(long Id, long CareerId, MatchInput Input, string Result, DateTime CreatedAt);
 public sealed record CareerFixture(long Id, long CareerId, string Provider, string EventKey, string Date,
     string Competition, string Opponent, bool IsHome, string Status, int Confidence, string Evidence,
     DateTime UpdatedAt);
+public sealed record MatchReview(long Id, long CareerId, string Provider, string EventKey, string SourcePath,
+    string FileFingerprint, DateTime CapturedAt, string MatchJson, string SnapshotJson, string Status,
+    DateTime CreatedAt, DateTime UpdatedAt);
+public sealed record PostMatchInterview(long Id, long CareerId, long MatchId, string TriggerType, int Importance,
+    string QuestionsJson, string AnswersJson, int CurrentQuestion, string Status, DateTime CreatedAt, DateTime UpdatedAt);
+public sealed record InterviewTurn(string Question,string Answer,string JournalistResponse,bool AiGenerated);
+public sealed record InterviewReply(string JournalistResponse,bool AiGenerated,int InputTokens=0,int OutputTokens=0);
+public sealed record CareerNotification(long Id,long CareerId,string Kind,string Title,string Body,string Action,
+    int Priority,bool IsRead,string DedupeKey,DateTime CreatedAt);
+public sealed record CareerProgressSnapshot(long Id,long CareerId,DateTime CapturedAt,string CareerDate,string Club,
+    string League,string Position,int ShirtNumber,int Overall,int Form,bool Injured,int Appearances,int Goals,
+    int Assists,int YellowCards,int RedCards,string SourceFingerprint);
 public sealed record ProviderCharacterFact(string ExternalId, string Name, int Age, string Nationality,
     string Club, string Position, string SquadRole, CharacterType Type, string FactsJson, string PayloadJson);
 public sealed record ProviderCharacterSyncResult(int Added, int Updated, int MarkedInactive);
@@ -59,11 +74,16 @@ public sealed record Memory(long Id, long CareerId, long CharacterId, long? Even
     DateTime? LastRecalled, bool IsCompressed = false);
 public sealed record Narrative(long Id, long CareerId, string Type, int Strength, string Status,
     DateTime LastUpdated, string EvidenceJson);
-public sealed record ConversationMessage(string Role, string Content, DateTime Timestamp);
+public sealed record ConversationMessage(string Role, string Content, DateTime Timestamp)
+{
+    public string DisplayRole=>Role.ToLowerInvariant() switch{"user"=>"YOU","assistant"=>"INCOMING","journalist"=>"JOURNALIST",_=>Role.ToUpperInvariant()};
+}
 public sealed record NewsItem(long Id, long CareerId, long? EventId, string Outlet, string Headline,
     string Body, string Sentiment, int Importance, DateTime PublishedAt);
 public sealed record SocialPost(long Id, long CareerId, long? EventId, string Author, string Persona,
     string Content, DateTime PublishedAt);
+public sealed record GenerationJob(long Id,long CareerId,long? EventId,string Kind,string DedupeKey,string Status,
+    int Attempts,string? Error,string PayloadJson,DateTime CreatedAt,DateTime UpdatedAt);
 public sealed record GenerationResult(string Text, string Mood, int RelationshipDelta, int TrustDelta,
     int RespectDelta, IReadOnlyList<string> Memories, int InputTokens = 0, int OutputTokens = 0,
     string Raw = "");

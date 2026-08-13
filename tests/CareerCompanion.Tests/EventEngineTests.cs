@@ -15,4 +15,5 @@ public sealed class EventEngineTests
     [Fact] public void Detects_winning_streak(){var events=new EventEngine().Detect(1,4,Match(1,0),Prior("W","W"));Assert.Contains(events,x=>x.Type=="WINNING_STREAK");}
     [Fact] public void Detects_losing_streak(){var events=new EventEngine().Detect(1,4,Match(0,1),Prior("L","L"));Assert.Contains(events,x=>x.Type=="LOSING_STREAK");}
     [Fact] public void Major_derby_is_more_important(){var routine=new EventEngine().Detect(1,1,Match(1,0),[]).First(x=>x.Type=="MATCH_WON");var major=new EventEngine().Detect(1,2,Match(1,0,derby:true,major:true),[]).First(x=>x.Type=="MATCH_WON");Assert.True(major.Importance>routine.Importance);}
+    [Fact] public void Unknown_starter_status_creates_no_selection_claim(){var match=Match(1,0) with{Started=false,StartedKnown=false};var events=new EventEngine().Detect(1,1,match,[]);Assert.DoesNotContain(events,x=>x.Type is "PLAYER_STARTED" or "PLAYER_BENCHED");}
 }

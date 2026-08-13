@@ -23,7 +23,7 @@ public sealed class EventEngine
         if (match.Rating >= 9) Add("PLAYER_HIGH_RATING", 55, $"Earned a {match.Rating:0.0} rating.");
         if (match.RedCard) Add("PLAYER_RED_CARD", 75, "Was sent off.");
         if (match.YellowCard && !match.RedCard) Add("PLAYER_YELLOW_CARD", 16, "Was booked.");
-        if (!match.Started) Add("PLAYER_BENCHED", 25, "Began the match on the bench."); else Add("PLAYER_STARTED", 8, "Started the match.");
+        if (match.StartedKnown) { if (match.Started) Add("PLAYER_STARTED", 8, "Started the match."); else Add("PLAYER_BENCHED", 25, "Began the match on the bench."); }
         if (match.PenaltyMissed) Add("PLAYER_MISSED_PENALTY", 55, "Missed a penalty.");
         if (match.IsDerby) Add("RIVAL_MATCH", 30 + BaseImportance(match), $"Played a rivalry match against {match.Opponent}.");
         if (result < 0 && match.OpponentScore - match.TeamScore >= 3) Add("LARGE_DEFEAT", 78, "Suffered a heavy defeat.");

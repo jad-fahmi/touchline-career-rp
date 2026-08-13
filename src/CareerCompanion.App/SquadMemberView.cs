@@ -22,7 +22,7 @@ public sealed record SquadMemberView(
     public string ShirtLabel => ShirtNumber is null ? "No number" : $"#{ShirtNumber}";
     public string OverallLabel => Overall is null ? "Not rated" : $"OVR {Overall}";
     public string FormLabel => Form is null ? "Form unavailable" : $"Form {Form}";
-    public string Availability => Injured ? "INJURED" : Active ? "AVAILABLE" : "FORMER TEAMMATE";
+    public string Availability => Injured ? "INJURED" : Active ? IsFifaFact ? "NO INJURY FLAG" : "ACTIVE" : "FORMER TEAMMATE";
     public string SourceLabel => IsFifaFact ? "FIFA SAVE FACT" : "MANUAL CHARACTER";
 
     public static SquadMemberView From(Character character)

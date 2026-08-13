@@ -16,7 +16,7 @@ internal static class Fifa18Metadata
             ["mPrV"] = new("career_users", F(
                 ("uipx","userid",-1),("HdeP","firstname",0),("rREd","surname",0),
                 ("GzsD","playertype",-1),("daeI","nationalteamid",-1),("Hwev","usertype",-1),
-                ("NTyS","clubteamid",-1),("aQrQ","leagueid",-1),("CXJt","seasoncount",0),
+                ("NTyS","clubteamid",-1),("aQrQ","leagueid",-1),("CXJt","seasoncount",0),("zvSh","agentname",0),
                 ("NGIq","nationalityid",0))),
             ["bxis"] = new("career_playasplayer", F(
                 ("uipx","userid",0),("hWNP","playedlastmatch",0),("ykFq","playerid",-1),
@@ -28,7 +28,7 @@ internal static class Fifa18Metadata
                 ("uipx","userid",0),("vojK","season",0),("mCXg","teamid",-1),
                 ("nVWT","appearances",0),("MERA","goals",0),("xEsZ","assists",0),
                 ("isoi","totalyellows",0),("GGVF","totalreds",0),("zjtP","wins",0),
-                ("EBvI","draws",0),("BsgO","loses",0),("qnUa","matchratings",0))),
+                ("EBvI","draws",0),("BsgO","loses",0),("qnUa","matchratings",0),("VvuV","overall",1))),
             ["TtHG"] = new("career_playermatchratinghistory", F(
                 ("JMld","artificialkey",0),("Amxm","minsplayed",-1),("Xxmh","rating",-1),
                 ("ykFq","playerid",0),("HBfc","date",20080101),("vjla","position",0))),
@@ -40,6 +40,8 @@ internal static class Fifa18Metadata
                 ("Xdcs","newsid",0),("mCXg","teamid",-1),("AmzQ","title",0),
                 ("gKSa","importance",0),("ykFq","playerid",-1),("HBfc","date",20080101),
                 ("WrfA","body",0))),
+            ["Knen"] = new("managers", F(
+                ("mCXg","teamid",1),("VHIB","managerid",1),("HdeP","firstname",0),("rREd","surname",0))),
             ["NgwF"] = new("career_competitionprogress", F(
                 ("mCXg","teamid",0),("GFQY","compshortname",0),("SDel","hasteamwon",0),
                 ("vojK","season",0),("KPUK","stageid",-1),("OvfW","compobjid",0))),

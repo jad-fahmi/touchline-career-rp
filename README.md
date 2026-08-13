@@ -22,15 +22,18 @@ The app owns facts, state, chronology, relationships, memory, bounds, and event 
 
 - First-run fictional demonstration career and manual career creation
 - Read-only FIFA 18 Player Career save discovery, including OneDrive-redirected Documents folders
-- Optional save-folder watcher, review-first match staging, career linking, and duplicate-import prevention
-- Automatic teammate reconciliation by stable FIFA player ID, with transfers/departures preserved in character history
-- Automatic next-fixture detection from FIFA-generated match previews
+- Startup synchronization and a self-healing save-folder watcher with career routing by FIFA player ID
+- Persistent match-review inbox, career linking, dismissal history, chronological safety checks, and idempotent provider match storage
+- Automatic teammate reconciliation by stable FIFA player ID, with transfers and departures preserved in character history
+- Automatic verified manager and agent creation, replacement reconciliation, FIFA Wire news import, international call-up detection, progression snapshots, and next-fixture detection
 - Quick squad/manager/journalist entry; structured profile editing and JSON import/export
 - Fast post-match form and deterministic win/loss/draw, scoring, card, streak, derby, major-fixture, heavy-defeat, and late-winner events
 - Importance heuristics, selective reaction targeting, silence for minor events, and narrative emergence/decay
 - Multi-dimensional bounded relationships and validated model deltas
 - Per-character memory persistence, relevance ranking, and conservative compression architecture
-- Scene-aware messages, manager context, contextual press questions, and persisted public statements
+- Automatic incoming teammate and manager reactions, stateful characters, an unread World Updates inbox, and sender-aware navigation
+- Persistent automatic-generation jobs that show an immediate offline fallback and rewrite it with character-aware LLM dialogue when an API key is available
+- Scene-aware messages, manager and agent conversations, conditional multi-question post-match interviews with grounded AI follow-ups and offline fallback, and consequential public statements
 - Differentiated offline news outlets and social personas
 - Career dashboard, chronological timeline, settings, debug inspector, and DPAPI-protected API keys
 - Consistent SQLite export/restore backup
@@ -56,11 +59,15 @@ On first launch, a small career named **Touchline Demo (Fictional)** is created 
 
 Open **Career** and use the **Automatic FIFA 18 Sync** card. Touchline discovers the newest `Career*` file under the FIFA 18 settings directory. Enable the watcher to scan again after FIFA writes a save, or use **Scan newest save** at any time.
 
-On the first scan, Touchline offers to create a linked companion career from the FIFA player, club, season, position, shirt number, and current save date. It also imports the current teammates and the next confirmed fixture. A detected result is staged in the existing post-match form so uncertain fields can be reviewed before **Process match** is selected. The watcher never submits a match by itself.
+On the first scan, Touchline creates a linked companion career automatically when the fictional demo is the only local career. Otherwise it asks before linking. The link includes the FIFA player, club, season, position, shirt number, current career date, teammates, verified club manager, named agent, FIFA news, progression baseline, and the next confirmed fixture.
+
+A detected result is stored in the match-review inbox and survives restarts. The first result and every ambiguous result stay editable because cumulative statistics or unsupported fields may be uncertain. Once Touchline has a chronological baseline, a result is imported automatically only when the save proves exactly one new appearance and a matching FIFA review proves the opponent and score. Dismissed detections are remembered. Provider-linked match storage, events, reactions, and media are deduplicated so a retry cannot create another match.
 
 Teammates are reconciled using their stable FIFA player IDs. A later scan updates factual details such as club, position, shirt number, overall rating, form, and injury state without replacing personalities, relationships, conversations, or memories. Players missing from a later club squad are retained as former teammates rather than deleted. Real-player display names come from the embedded offline FIFA 18 ID index; edited and generated-player names come from the save.
 
-The fixture view stores confirmed FIFA preview records and supersedes the previous upcoming fixture when a newer preview appears. FIFA's complete future-season schedule is not present in the tested career save, so Touchline does not invent unconfirmed calendar entries.
+The fixture view stores confirmed FIFA preview records, surfaces FIFA's own match briefing and availability notes, completes a matching played fixture, and supersedes the previous upcoming fixture when a newer preview appears. FIFA's complete future-season schedule is not present in the tested career save, so Touchline does not invent unconfirmed calendar entries.
+
+Each distinct save snapshot updates verified identity and career facts and records progression such as overall rating, club, position, and shirt-number changes. FIFA news appears as a dated FIFA Wire feed. Important matches can create incoming teammate or manager messages, press duties, news, social reactions, memories, relationship changes, and persistent character mood. These world effects use the in-career date rather than the computer's current date.
 
 Save files are opened read-only after their size and timestamp settle. Touchline writes only to its own SQLite database. Each imported FIFA event has a stable provider key and a source fingerprint, so rescanning the same result does not create a duplicate. Keep using FIFA's normal save and backup practices; no third-party tool can guarantee recovery from a corrupted game save.
 
@@ -68,13 +75,13 @@ Save files are opened read-only after their size and timestamp settle. Touchline
 
 The application remains useful without an API key. Career entry, SQLite, deterministic events, squad management, offline media, timeline, press statement storage, debug tools, and backup remain available.
 
-For character messages:
+For character messages, journalist follow-ups, and richer automatic incoming reactions:
 
 1. Open Settings.
 2. Paste an OpenAI API key and choose default/premium models.
 3. Save settings. The key is encrypted with Windows DPAPI for the current Windows user and is never logged.
 
-For development, `OPENAI_API_KEY`, `OPENAI_DEFAULT_MODEL`, and `OPENAI_PREMIUM_MODEL` environment variables are also recognized; see `.env.example`. No dotenv file is automatically loaded. The REST contract follows the official [Responses API structured-output format](https://developers.openai.com/api/docs/guides/structured-outputs).
+For development, `OPENAI_API_KEY`, `OPENAI_DEFAULT_MODEL`, and `OPENAI_PREMIUM_MODEL` environment variables are also recognized; see `.env.example`. `TOUCHLINE_DATA_DIR` can point a development or smoke-test run at an isolated database directory. No dotenv file is automatically loaded. The REST contract follows the official [Responses API structured-output format](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 Model availability and pricing change. Models are settings, not hard-coded business rules. The default configuration uses a cost-sensitive model for routine dialogue and a premium model for high-importance scenes; premium routing can be disabled.
 
@@ -86,7 +93,7 @@ The authoritative database is:
 %LOCALAPPDATA%\TouchlineCareerCompanion\career-world.db
 ```
 
-Use **Settings → Export Backup** for an online-consistent SQLite copy. **Restore Backup** validates the migration table and requires confirmation before replacing local data. Back up before restoring.
+Use **Settings > Export Backup** for an online-consistent SQLite copy. **Restore Backup** validates the migration table and requires confirmation before replacing local data. Back up before restoring.
 
 Schema creation is versioned through `schema_migrations`; future migrations should be additive and registered with a new version. FIFA imports are audited in `provider_imports`; stable squad links live in `provider_entities`; confirmed previews live in `fixtures`.
 
@@ -124,9 +131,10 @@ Enable Developer/debug mode in Settings. The hidden Debug navigation then shows 
 
 ## Limitations
 
-- The save parser currently targets Player Career. It imports identity, club, season/date, position/number, cumulative player statistics, teammates, squad injuries, and the latest match/preview records; tables and trophy state still require manual entry.
+- The save parser currently targets Player Career. It imports identity, club, season and date, position and number, reliable career overall, cumulative player statistics, teammates, manager, agent, FIFA news, and the latest match and preview records. Tables and trophy state still require manual entry.
 - Only fixtures confirmed by a FIFA-generated preview are synchronized. The tested save contains no populated full-season `fixtures` table.
 - The first detected result is marked for review because the save contains cumulative statistics without a prior Touchline baseline. Later saves can calculate stat deltas from the last imported snapshot.
+- Starter status, penalties, derby classification, suspensions, and the career player's exact injury state are not reliably exposed by the currently validated tables. They remain review inputs or are described as unknown; Touchline does not infer a bench appearance from minutes played.
 - FIFA 18 save structures are undocumented and can vary with platform, title update, mode, or mod. Unknown or malformed layouts fail closed and are not modified.
 - Generated AI dialogue requires the user's OpenAI account, model access, and network connection. No live-key request is made by the test suite.
 - News and social generation has a deterministic offline fallback; the current UI does not expose advanced pricing-table editing or a visual generation-job queue monitor.
@@ -140,8 +148,8 @@ It does not attach to `FIFA18.exe`, inject code, automate gameplay, write game d
 
 ## Roadmap
 
-- **Current:** manual entry plus review-first, automatic FIFA 18 Player Career save detection
-- **Next:** richer squad, competition, transfer, trophy, and history synchronization
-- **Later:** deeper world simulation informed by additional verified save facts
+- **Current:** automatic FIFA 18 synchronization, safe match import, international call-ups, world updates, incoming character reactions, interviews, media, and progression tracking
+- **Next:** deeper narratives and verified award, trophy, and transfer-detail events
+- **Later:** opponent scouting and richer competition context from additional validated save facts
 
-The best next step is to use V1 through a real 10–20 match run, inspect reaction/noise behavior in Debug, and tune importance and character profiles from observed play before adding CSV import.
+The best next step is to use the current build through a real 10 to 20 match run, inspect reaction volume and chronology in Debug, and tune importance and character profiles from observed play.
