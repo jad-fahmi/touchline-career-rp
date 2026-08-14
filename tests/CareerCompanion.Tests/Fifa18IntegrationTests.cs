@@ -90,6 +90,14 @@ public sealed class Fifa18IntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Fifa_source_routes_to_the_career_that_owns_the_save_file()
+    {
+        Directory.CreateDirectory(_dir);var db=new Database(Path.Combine(_dir,"source-routing.db"));db.Migrate();var first=db.CreateCareer("first","Player One","",18,"Club","League","2017/18","ST",9);var second=db.CreateCareer("second","Player Two","",18,"Club","League","2017/18","ST",9);
+        db.SetSetting($"career:{first}:fifa_source","Career20260814141055A");db.SetSetting($"career:{second}:fifa_source","Career20260814142336");
+        Assert.Equal(second,db.FindCareerIdByFifaSource("C:\\Saves\\Career20260814142336"));Assert.Null(db.FindCareerIdByFifaSource("CareerMissing"));
+    }
+
+    [Fact]
     public void Squad_sync_updates_in_place_preserves_relationships_and_marks_departures()
     {
         Directory.CreateDirectory(_dir);var db=new Database(Path.Combine(_dir,"squad.db"));db.Migrate();var career=db.CreateCareer("s","p","n",18,"Real Madrid","l","2017/18","ST",9);
