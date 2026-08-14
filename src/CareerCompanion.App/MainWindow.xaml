@@ -85,7 +85,7 @@
             <Border Style="{StaticResource Card}">
               <StackPanel>
                 <TextBlock Text="Conversation with" Style="{StaticResource Label}"/>
-                <ComboBox ItemsSource="{Binding Characters}" SelectedItem="{Binding SelectedCharacter}">
+                <ComboBox ItemsSource="{Binding MessageCharacters}" SelectedItem="{Binding SelectedCharacter}">
                   <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate>
                 </ComboBox>
                 <TextBlock Text="Your messages sit on the right. Replies sit on the left." Foreground="{StaticResource Muted}" FontSize="11" Margin="0,6,0,10"/>
@@ -147,7 +147,7 @@
                                 </Style>
                               </TextBlock.Style>
                             </TextBlock>
-                            <TextBlock Text="{Binding Content}" TextWrapping="Wrap" Margin="0,5,0,0">
+                            <TextBlock Text="{Binding DisplayContent}" TextWrapping="Wrap" Margin="0,5,0,0">
                               <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                   <Setter Property="Foreground" Value="{StaticResource Text}"/>

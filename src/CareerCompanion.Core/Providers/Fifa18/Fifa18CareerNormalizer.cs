@@ -57,7 +57,8 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         var careerStartYear = (ParseFifaDate(startDate) ?? careerDate).Year;
         var startYear=careerStartYear+seasonNumber-1;
         var squad = NormalizeSquad(data, clubId, playerId, clubName, careerDate);
-        var nextFixture = DetectNextFixture(data, state, clubName, clubId,nationalTeamId,nationalTeamName,internationalMatch);
+        var playerAvailability = DetectPlayerAvailability(data, playerId, playerName, currentDate);
+        var nextFixture = DetectNextFixture(data, state, clubName, clubId,nationalTeamId,nationalTeamName,internationalMatch,playerName,playerAvailability);
         var opponentScout = nextFixture is null ? null : BuildOpponentScout(data,nextFixture.Opponent,clubId,careerDate);
         var manager=data.Table("managers").FirstOrDefault(r=>I(r,"teamid")==clubId);var managerName=JoinName(S(manager,"firstname"),S(manager,"surname"));
         var agentName=S(user,"agentname");
@@ -68,7 +69,8 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         return new(sourcePath,fingerprint,File.GetLastWriteTimeUtc(sourcePath),playerName,playerId,nationalityId,nationalityName,age,
             clubName,clubId,leagueId,leagueName,$"{startYear}/{(startYear+1)%100:00}",careerDate.ToString("yyyy-MM-dd"),
             PositionName(I(play,"position")),I(clubLink,"jerseynumber"),state,detected,squad,nextFixture,squadCount,diagnostics,
-            I(history,"overall"),I(clubLink,"form"),false,managerName,agentName,worldNews,false,nationalTeamId,nationalTeamName,opponentScout);
+            I(history,"overall"),I(clubLink,"form"),playerAvailability=="Injured",managerName,agentName,worldNews,
+            playerAvailability=="Injured",nationalTeamId,nationalTeamName,opponentScout,playerAvailability);
     }
 
     private Fifa18OpponentScout? BuildOpponentScout(Fifa18SaveData data,string opponentName,int clubId,DateTime careerDate)
@@ -113,18 +115,19 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
     }
 
     private static Fifa18DetectedFixture? DetectNextFixture(Fifa18SaveData data, Fifa18SyncState state,
-        string clubName, int clubId,int nationalTeamId,string nationalTeamName,Fifa18DetectedMatch? internationalMatch)
+        string clubName, int clubId,int nationalTeamId,string nationalTeamName,Fifa18DetectedMatch? internationalMatch,
+        string playerName,string playerAvailability)
     {
         var clubFixture=data.Table("career_news")
             .Where(r => I(r,"date") > state.LatestRatingDate &&
                         (state.CareerDate <= 0 || I(r,"date") <= state.CareerDate))
             .OrderByDescending(r => I(r,"date"))
-            .Select(r => ParseFixturePreview(S(r,"title"),I(r,"date"),clubName,clubId,S(r,"body")))
+            .Select(r => ParseFixturePreview(S(r,"title"),I(r,"date"),clubName,clubId,S(r,"body"),playerName,playerAvailability))
             .FirstOrDefault(x => x is not null);
         var nationalFixture=nationalTeamId<=0?null:data.Table("career_news")
             .Where(r=>I(r,"teamid")==nationalTeamId&&I(r,"playerid")==state.PlayerId)
             .OrderByDescending(r=>I(r,"date"))
-            .Select(r=>ParseInternationalFixture(S(r,"title"),S(r,"body"),I(r,"date"),nationalTeamId,nationalTeamName))
+            .Select(r=>ParseInternationalFixture(S(r,"title"),S(r,"body"),I(r,"date"),nationalTeamId,nationalTeamName,playerName,playerAvailability))
             .FirstOrDefault(x=>x is not null && (internationalMatch is null || x.Date!=internationalMatch.Date));
         return Latest(clubFixture,nationalFixture);
     }
@@ -139,23 +142,25 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         var date=I(result,"date");if(date<=state.LatestRatingDate)return null;
         var outcome=InternationalOutcome(S(result,"title"),S(result,"body"));
         var resultDate=ParseFifaDate(date)??DateTime.Today;var related=articles.Where(r=>ParseFifaDate(I(r,"date")) is { } articleDate&&articleDate<=resultDate&&articleDate>=resultDate.AddDays(-21)).ToList();
-        var opponent=related.Select(r=>InternationalOpponent(S(r,"title")+" "+S(r,"body"),nationalTeamName)).FirstOrDefault(x=>!string.IsNullOrWhiteSpace(x))??"Review opponent";
+        var opponent=related.Select(r=>InternationalOpponent(S(r,"title")+" "+S(r,"body"),nationalTeamName)).FirstOrDefault(x=>!string.IsNullOrWhiteSpace(x))??"Opponent unknown";
         var competition=related.Select(r=>InternationalCompetition(S(r,"title"))).FirstOrDefault(x=>!string.IsNullOrWhiteSpace(x))??"International";
         var raw=$"{date}|{S(result,"title")}|{S(result,"body")}";var hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw))).ToLowerInvariant()[..20];
-        diagnostics.Add($"International appearance detected for {nationalTeamName}. FIFA did not expose the exact score or player performance fields, so review is required.");
-        var evidence=$"FIFA national-team news: {S(result,"title")}. {S(result,"body").Trim()} Exact score, minutes, rating, goals, assists, cards, venue, and starter status require review.";
+        diagnostics.Add($"International appearance detected for {nationalTeamName}. FIFA exposed the appearance news but not the scoreline or individual performance fields; those fields remain unknown.");
+        var evidence=$"FIFA national-team news: {S(result,"title")}. {S(result,"body").Trim()} Exact score, minutes, rating, goals, assists, cards, venue, and starter status were not exposed.";
         return new($"p{playerId}:national:{nationalTeamId}:news:{hash}",(ParseFifaDate(date)??DateTime.Today).ToString("yyyy-MM-dd"),competition,opponent,true,
-            0,0,true,0,0,0,0,false,false,88,evidence,true,false,"International",nationalTeamName,false);
+            0,0,false,0,0,0,0,false,false,88,evidence,false,false,"International",nationalTeamName,false);
     }
 
-    private static Fifa18DetectedFixture? ParseInternationalFixture(string title,string body,int date,int teamId,string teamName)
+    private static Fifa18DetectedFixture? ParseInternationalFixture(string title,string body,int date,int teamId,string teamName,
+        string playerName = "",string availabilityHint = "Unknown")
     {
         if(InternationalOutcome(title,body)!=0)return null;
         var opponent=InternationalOpponent(title+" "+body,teamName);if(string.IsNullOrWhiteSpace(opponent))return null;
         var parsedDate=ParseFifaDate(date);if(parsedDate is null)return null;
         var competition=InternationalCompetition(title);if(string.IsNullOrWhiteSpace(competition))competition="International";
+        var availability=DetectFixtureAvailability(title,body,playerName,availabilityHint);
         return new($"national:{teamId}:fixture:{date}:{Normalize(opponent).ToLowerInvariant()}",parsedDate.Value.ToString("yyyy-MM-dd"),competition,opponent,true,76,
-            $"FIFA national-team news: {title}. {body.Trim()}","International",teamName);
+            $"FIFA national-team news: {title}. {body.Trim()}","International",teamName,availability);
     }
 
     private static int InternationalOutcome(string title,string body)
@@ -193,25 +198,34 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         if (rating is null || state.LatestRatingKey < 0 || state.LatestRatingDate <= 0)
         { diagnostics.Add("No player match-rating record is available yet."); return null; }
         var date = ParseFifaDate(state.LatestRatingDate) ?? DateTime.Today;
-        var report = data.Table("career_news").Where(r => I(r,"date") == state.LatestRatingDate)
-            .Select(r => ParseMatchReport(S(r,"title"),S(r,"body"),clubName)).FirstOrDefault(x => x is not null);
-        var sameSeason=previous is not null&&previous.Season==state.Season;var appearanceDelta=sameSeason?state.Appearances-previous!.Appearances:0;var singleMatch=sameSeason&&appearanceDelta==1&&state.LatestRatingDate>previous!.LatestRatingDate;
-        var goals = singleMatch ? Math.Max(0,state.Goals-previous!.Goals) : 0;
-        var assists = singleMatch ? Math.Max(0,state.Assists-previous!.Assists) : 0;
-        var yellow = singleMatch && state.YellowCards>previous!.YellowCards;
-        var red = singleMatch && state.RedCards>previous!.RedCards;
+        var report = data.Table("career_news")
+            .Select(r => new{Row=r,Date=ParseFifaDate(I(r,"date"))})
+            .Where(x=>x.Date is not null&&Math.Abs((x.Date.Value-date).TotalDays)<=1)
+            .OrderBy(x=>Math.Abs((x.Date!.Value-date).TotalDays))
+            .Select(x=>ParseMatchReport(S(x.Row,"title"),S(x.Row,"body"),clubName))
+            .FirstOrDefault(x=>x is not null);
+        var sameSeason=previous is not null&&previous.Season==state.Season;var appearanceDelta=sameSeason?state.Appearances-previous!.Appearances:0;
+        var bootstrapMatch=previous is null&&state.Season>0&&state.Appearances==1;
+        var seasonOpeningMatch=previous is not null&&previous.Season<state.Season&&state.Appearances==1&&state.LatestRatingDate>previous.LatestRatingDate;
+        var singleMatch=(sameSeason&&appearanceDelta==1&&state.LatestRatingDate>previous!.LatestRatingDate)||bootstrapMatch||seasonOpeningMatch;
+        var priorGoals=bootstrapMatch||seasonOpeningMatch?0:previous?.Goals??0;var priorAssists=bootstrapMatch||seasonOpeningMatch?0:previous?.Assists??0;var priorYellow=bootstrapMatch||seasonOpeningMatch?0:previous?.YellowCards??0;var priorRed=bootstrapMatch||seasonOpeningMatch?0:previous?.RedCards??0;
+        var goals = singleMatch ? Math.Max(0,state.Goals-priorGoals) : 0;
+        var assists = singleMatch ? Math.Max(0,state.Assists-priorAssists) : 0;
+        var yellow = singleMatch && state.YellowCards>priorYellow;
+        var red = singleMatch && state.RedCards>priorRed;
         var minutes = Math.Max(0,I(rating,"minsplayed"));
         var eventKey = $"p{state.PlayerId}:rating:{state.LatestRatingKey}:date:{state.LatestRatingDate}";
-        var confidence = report is null ? 55 : singleMatch ? 96 : previous is null ? 78 : 72;
+        var confidence = report is null ? (singleMatch ? 90 : 55) : singleMatch ? 96 : previous is null ? 78 : 72;
         var evidence = report is null
-            ? $"FIFA save rating history: {minutes} minutes, rating {I(rating,"rating")}. Opponent and score require review."
+            ? $"FIFA save rating history: {minutes} minutes, rating {I(rating,"rating")}. FIFA did not expose the opponent or scoreline; those fields remain unknown."
             : $"FIFA save and generated match report: {report.Evidence}";
-        if (previous is null) diagnostics.Add("No previous imported snapshot: per-match goal, assist, and card deltas require review.");
+        if (previous is null&&!bootstrapMatch) diagnostics.Add("No previous imported snapshot and more than one appearance is present; per-match deltas require review.");
+        else if(seasonOpeningMatch)diagnostics.Add("Season rollover confirmed: cumulative counters were reset before the opening appearance.");
         else if(!singleMatch)diagnostics.Add($"Exactly one new appearance could not be proven (appearance delta {appearanceDelta}); individual stat deltas require review.");
-        if (report is null) diagnostics.Add("No matching FIFA match-review article: opponent and score could not be proven.");
-        return new(eventKey,date.ToString("yyyy-MM-dd"),report?.Competition??"Career match",report?.Opponent??"Review opponent",
-            report?.IsHome??true,report?.TeamScore??0,report?.OpponentScore??0,true,minutes,goals,assists,
-            I(rating,"rating"),yellow,red,confidence,evidence,!singleMatch||report is null);
+        if (report is null) diagnostics.Add("No matching FIFA match-review article: opponent and score remain unknown, but the appearance can still be imported when the single-match delta is proven.");
+        return new(eventKey,date.ToString("yyyy-MM-dd"),report?.Competition??"Career match",report?.Opponent??"Opponent unknown",
+            report?.IsHome??true,report?.TeamScore??0,report?.OpponentScore??0,false,minutes,goals,assists,
+            I(rating,"rating"),yellow,red,confidence,evidence,!singleMatch,false,"Club",clubName,report is not null);
     }
 
     public static MatchReport? ParseMatchReport(string title,string body,string clubName)
@@ -241,7 +255,8 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
             $"{title}; {home} {homeScore}-{awayScore} {away}");
     }
 
-    public static Fifa18DetectedFixture? ParseFixturePreview(string title, int date, string clubName, int clubId,string body="")
+    public static Fifa18DetectedFixture? ParseFixturePreview(string title, int date, string clubName, int clubId,string body="",
+        string playerName = "", string availabilityHint = "Unknown")
     {
         var match=PreviewTitle().Match(title);
         if(!match.Success)return null;
@@ -251,8 +266,50 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
         var parsedDate=ParseFifaDate(date);if(parsedDate is null)return null;
         var opponent=isHome?away:home;
         var evidence=string.IsNullOrWhiteSpace(body)?$"FIFA generated preview: {title}":$"FIFA generated preview: {title}. {body.Trim()}";
+        var availability=DetectFixtureAvailability(title,body,playerName,availabilityHint);
         return new($"club:{clubId}:fixture:{date}:{Normalize(opponent).ToLowerInvariant()}",parsedDate.Value.ToString("yyyy-MM-dd"),
-            competition,opponent,isHome,90,evidence);
+            competition,opponent,isHome,90,evidence,"Club",clubName,availability);
+    }
+
+    private static string DetectPlayerAvailability(Fifa18SaveData data,int playerId,string playerName,int careerDate)
+    {
+        var current=ParseFifaDate(careerDate);
+        var relevant=data.Table("career_news")
+            .Where(row=>I(row,"date")>0&&I(row,"date")<=careerDate&&MentionsPlayer(row,playerId,playerName))
+            .Select(row=>new{Row=row,Date=ParseFifaDate(I(row,"date"))})
+            .Where(x=>x.Date is not null&&(current is null||(current.Value-x.Date!.Value).TotalDays<=45))
+            .OrderByDescending(x=>x.Date).FirstOrDefault();
+        if(relevant is null)return "Unknown";
+        return ClassifyAvailability(S(relevant.Row,"title")+" "+S(relevant.Row,"body"));
+    }
+
+    private static string DetectFixtureAvailability(string title,string body,string playerName,string availabilityHint)
+    {
+        var explicitStatus=string.IsNullOrWhiteSpace(playerName)?"Unknown":ClassifyAvailability(title+" "+body,playerName);
+        return explicitStatus!="Unknown"?explicitStatus:(string.IsNullOrWhiteSpace(availabilityHint)?"Unknown":availabilityHint);
+    }
+
+    private static string ClassifyAvailability(string text,string? playerName=null)
+    {
+        if(playerName is not null&&!MentionsPlayer(text,playerName))return "Unknown";
+        if(ContainsAny(text,"no longer injured","returned from injury","back from injury","recovered from injury","injury has healed","fit again","available again"))return "Unknown";
+        if(ContainsAny(text,"suspended","suspension","sent off","sending-off","sending off","red card"))return "Suspended";
+        if(ContainsAny(text,"injured","injury","injuries","sidelined","out injured","medical issue"))return "Injured";
+        if(ContainsAny(text,"not selected","not in the squad","left out","omitted from the squad","dropped from the squad","will miss the match","miss the match","ruled out","unavailable"))return "NotSelected";
+        if(ContainsAny(text,"on the bench","named among the substitutes","named as a substitute","will start","starting xi","starting eleven","starting lineup"))
+            return ContainsAny(text,"on the bench","named among the substitutes","named as a substitute")?"Benched":"Selected";
+        return "Unknown";
+    }
+
+    private static bool MentionsPlayer(IReadOnlyDictionary<string,object> row,int playerId,string playerName)
+        => I(row,"playerid")==playerId||MentionsPlayer(S(row,"title")+" "+S(row,"body"),playerName);
+
+    private static bool MentionsPlayer(string text,string playerName)
+    {
+        if(string.IsNullOrWhiteSpace(playerName))return false;
+        if(text.Contains(playerName,StringComparison.OrdinalIgnoreCase))return true;
+        var surname=playerName.Split(' ',StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+        return !string.IsNullOrWhiteSpace(surname)&&surname.Length>=3&&Regex.IsMatch(text,$@"\b{Regex.Escape(surname)}\b",RegexOptions.IgnoreCase);
     }
 
     private static bool Same(string a,string b)=>string.Equals(Normalize(a),Normalize(b),StringComparison.OrdinalIgnoreCase);

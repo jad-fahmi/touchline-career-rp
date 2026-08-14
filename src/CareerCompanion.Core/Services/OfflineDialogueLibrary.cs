@@ -63,6 +63,9 @@ public static class OfflineDialogueLibrary
     public static string MatchReaction(Character character,Career career,CareerMatch match,CareerEvent evt)
     {
         var input=match.Input;var p=character.Profile.Personality;var c=character.Profile.Communication;var playful=p.Humor>=58||c.Humor>=58;var direct=p.Diplomacy<45||c.Directness>=74;var seed=Seed(character.Id.ToString(),career.CurrentDate,evt.Id.ToString(),evt.Type);
+        if(!input.ScoreKnown)return character.Type==CharacterType.Manager
+            ?Pick(new[]{"I have the appearance and rating logged, but FIFA did not expose the final score. We will fill in the result when the save gives us the detail.","Your minutes and performance are recorded. The save is missing the scoreline, so I will not pretend to know the result."},seed)
+            :Pick(new[]{"Your appearance and rating are in. FIFA has not given us the scoreline yet, so I am not going to make one up.","I saw the minutes and rating. The result is missing from the save, but your performance is logged."},seed);
         if(character.Type==CharacterType.Manager)
         {
             if(input.TeamContext=="International")return input.TeamScore>input.OpponentScore?Pick(new[]{$"Good work with {input.RepresentingTeam}. Recover properly, then return ready for club duty.","That is a useful result for {input.RepresentingTeam}. Enjoy it, then turn your attention back to the club.","You represented {input.RepresentingTeam} well. Manage your recovery because the club schedule will not wait."},seed):Pick(new[]{$"International defeats hurt. Reset tonight and bring your focus back to the club.","A difficult night for {input.RepresentingTeam}. Learn from it, recover, and return ready.","That result will sting, but international duty is part of your growth. We will discuss it when you are back."},seed);
@@ -92,9 +95,27 @@ public static class OfflineDialogueLibrary
         };
     }
 
-    public static string PreMatch(Character character,CareerFixture fixture,bool rival,string? keyThreat,int seed)
+    public static string PreMatch(Character character,CareerFixture fixture,bool rival,string? keyThreat,int seed,string availability="Unknown")
     {
         var p=character.Profile.Personality;var c=character.Profile.Communication;var opponent=fixture.Opponent;var venue=fixture.IsHome?"at home":$"away at {opponent}";
+        if(availability is "Injured" or "Suspended" or "NotSelected" or "Unavailable")
+        {
+            if(character.Type==CharacterType.Manager)return Pick(availability=="Injured"
+                ?new[]{$"You are not available for {opponent} while the injury is assessed. Focus on the recovery plan and stay close to the group.",$"The match against {opponent} will go on without you. No pressure to perform from the stands; get the medical work right."}
+                :availability=="Suspended"?new[]{$"You are unavailable for {opponent} through suspension. Stay involved, learn from the match, and be ready when the ban is served.",$"You cannot play against {opponent}. Keep your focus on the team and use the time out to reset."}
+                :new[]{$"You are not in the match selection for {opponent}. Keep training, support the group, and make the next decision harder.",$"You will not be on the pitch against {opponent}. I know that stings, but your response starts at the next session."},seed);
+            return Pick(new[]{$"Looks like you are not with us on the pitch against {opponent}. We will keep you close to the group.",$"The {opponent} match is not yours to play today. Stay around the lads and look after yourself."},seed);
+        }
+        if(availability=="Benched")
+        {
+            if(character.Type==CharacterType.Manager)return Pick(new[]{$"You are listed among the substitutes for {opponent}. Stay ready, but do not treat an appearance as guaranteed.",$"You are on the bench against {opponent}. Watch the game, stay warm, and be ready if the match needs you."},seed);
+            return Pick(new[]{$"You are on the bench for {opponent}. Keep your head in the game and be ready if your moment comes.",$"Not starting today, but the match can change quickly. Stay with the group and stay ready."},seed);
+        }
+        if(availability=="Unknown")
+        {
+            if(character.Type==CharacterType.Manager)return Pick(new[]{$"The next fixture is {opponent}, {venue}. Selection is not confirmed yet, so prepare without assuming you will play.",$"We are preparing for {opponent}, but FIFA has not confirmed your role. Be ready for any decision and keep the work honest."},seed);
+            return Pick(new[]{$"The next one is {opponent}, but your selection is not confirmed yet. We will know closer to kickoff.",$"No guarantee you will be on the pitch against {opponent}. Stay ready and stay with the group."},seed);
+        }
         if(character.Type==CharacterType.Manager)return Pick(rival?new[]{$"This is {opponent}, {venue}, and they will make it emotional. Be disciplined before you try to win it.",$"Rivalry matches punish loose decisions. Start with our shape against {opponent}, then let your quality decide it.",$"The occasion will be loud against {opponent}. I need your head clear and your work rate high."}:new[]{$"Against {opponent}, our first job is to control the spaces and play with patience.",$"Prepare properly for {opponent}. The details in your role will matter more than the noise around the match.",$"We have a plan for {opponent}. Trust it, communicate, and be ready for the moments that change the game."},seed);
         if(rival)return Pick(p.Humor>=60?new[]{$"Big one against {opponent}. If the atmosphere gets wild, at least make sure we enjoy winning it.",$"They will be talking before kick-off. Let us give them something to talk about after it.",$"Rivalry day. Keep your head, win your battles, and do not give them an easy story."}:new[]{$"Big one against {opponent}. We need to set the tone early.",$"The atmosphere will be intense. Stay brave on the ball and stay together.",$"Matches like this are remembered. Let us make sure the memory belongs to us."},seed);
         return Pick(new[]{$"Ready for {opponent}? Let us start quickly and make the match ours.",$"We have a chance to set the rhythm against {opponent}. Stay switched on from the first whistle.",$"No need for a speech. Do your job, help the man beside you, and the match will open up.",$"I have been looking forward to this one. Bring your sharpness and I will bring mine."},seed);

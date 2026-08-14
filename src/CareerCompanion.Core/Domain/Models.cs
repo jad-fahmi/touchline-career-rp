@@ -49,12 +49,15 @@ public sealed record MatchInput(string Date, string Competition, string Opponent
     int TeamScore, int OpponentScore, bool Started, int Minutes, int Goals, int Assists,
     double Rating, bool YellowCard, bool RedCard, bool PenaltyScored, bool PenaltyMissed,
     string Notes, string? NextOpponent = null, bool IsDerby = false, bool IsMajorFixture = false,
-    bool StartedKnown = true, string TeamContext = "Club", string RepresentingTeam = "");
+    bool StartedKnown = true, string TeamContext = "Club", string RepresentingTeam = "", bool ScoreKnown = true)
+{
+    public string ScoreLabel => ScoreKnown ? $"{TeamScore}-{OpponentScore}" : "Score unknown";
+}
 
 public sealed record CareerMatch(long Id, long CareerId, MatchInput Input, string Result, DateTime CreatedAt);
 public sealed record CareerFixture(long Id, long CareerId, string Provider, string EventKey, string Date,
     string Competition, string Opponent, bool IsHome, string Status, int Confidence, string Evidence,
-    DateTime UpdatedAt, string TeamContext = "Club", string RepresentingTeam = "");
+    DateTime UpdatedAt, string TeamContext = "Club", string RepresentingTeam = "", string Availability = "Unknown");
 public sealed record MatchReview(long Id, long CareerId, string Provider, string EventKey, string SourcePath,
     string FileFingerprint, DateTime CapturedAt, string MatchJson, string SnapshotJson, string Status,
     DateTime CreatedAt, DateTime UpdatedAt);
@@ -84,6 +87,19 @@ public sealed record ConversationMessage(string Role, string Content, DateTime T
     public string DisplayTimestamp=>Timestamp==default?"":Timestamp.ToString("dd MMM yyyy HH:mm");
     public string ConversationContext=>string.IsNullOrWhiteSpace(Scene)?"Conversation":$"{FormatScene(Scene)} | {(ConversationStartedAt==default?Timestamp:ConversationStartedAt):dd MMM yyyy HH:mm}";
     public string ReplyContext=>string.IsNullOrWhiteSpace(ReplyToPreview)?"":$"Replying to: {ReplyToPreview}";
+    public string DisplayContent
+    {
+        get
+        {
+            var value=Content.Trim();
+            if(value.StartsWith("{")&&value.EndsWith("}"))
+            {
+                try{using var json=JsonDocument.Parse(value);if(json.RootElement.TryGetProperty("dialogue",out var dialogue)&&dialogue.ValueKind==JsonValueKind.String)return dialogue.GetString()??value;}catch(JsonException){}
+            }
+            if(value.Contains("We need to respond as ",StringComparison.OrdinalIgnoreCase)||value.Contains("We need to output ",StringComparison.OrdinalIgnoreCase)||value.Contains("Return only valid JSON",StringComparison.OrdinalIgnoreCase)||value.Contains("Current journalist question:",StringComparison.OrdinalIgnoreCase)||value.Contains("Verified match facts:",StringComparison.OrdinalIgnoreCase))return "The previous reply could not be generated correctly. Send another message to try again.";
+            return Content;
+        }
+    }
     private static string FormatScene(string scene)=>scene switch{"PrivateMessage"=>"Private message","DressingRoom"=>"Dressing room","TrainingGround"=>"Training ground","PostMatch"=>"Post-match","PreMatch"=>"Pre-match","PressConference"=>"Press conference","ManagerOffice"=>"Manager office","TransferDiscussion"=>"Transfer discussion","Casual"=>"Casual",_=>scene.Replace('_',' ')};
 }
 public sealed record NewsItem(long Id, long CareerId, long? EventId, string Outlet, string Headline,

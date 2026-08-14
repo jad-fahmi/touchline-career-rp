@@ -14,22 +14,39 @@ public sealed class AutomaticWorldService(Database db)
     {
         var career=db.GetCareer(careerId);var timestamp=DateTime.TryParse(fixture.Date,out var date)?date:DateTime.UtcNow;
         var threats=scout?.KeyPlayers.Where(x=>x.Overall>0).Take(3).Select(x=>$"{x.Name} ({x.Position}, OVR {x.Overall})").ToList()??[];
-        var details=new List<string>{fixture.IsHome?$"Home fixture against {fixture.Opponent}":$"Away fixture at {fixture.Opponent}"};if(!string.IsNullOrWhiteSpace(scout?.ManagerName))details.Add($"managed by {scout.ManagerName}");if(threats.Count>0)details.Add("key threats: "+string.Join(", ",threats));if(!string.IsNullOrWhiteSpace(scout?.StadiumName)&&!fixture.IsHome)details.Add("venue: "+scout.StadiumName);
-        var summary=string.Join(". ",details)+".";var metadata=JsonSerializer.Serialize(new{fixture.EventKey,scout});var evtId=db.SaveEvent(new(0,careerId,null,"PRE_MATCH_BRIEFING",timestamp,scout?.IsRival==true?72:48,"[]",metadata,summary,FactClassification.SaveFact));
-        var notices=0;if(db.AddNotification(careerId,"Scouting",$"Briefing: {fixture.Opponent}",summary,"PreMatch",scout?.IsRival==true?80:60,$"prematch:{fixture.EventKey}",timestamp))notices++;
+        var availability=NormalizeAvailability(fixture.Availability);var availabilityText=AvailabilityText(availability);
+        var details=new List<string>{fixture.IsHome?$"Home fixture against {fixture.Opponent}":$"Away fixture at {fixture.Opponent}",availabilityText};if(!string.IsNullOrWhiteSpace(scout?.ManagerName))details.Add($"managed by {scout.ManagerName}");if(threats.Count>0)details.Add("key threats: "+string.Join(", ",threats));if(!string.IsNullOrWhiteSpace(scout?.StadiumName)&&!fixture.IsHome)details.Add("venue: "+scout.StadiumName);
+        var summary=string.Join(". ",details)+".";var metadata=JsonSerializer.Serialize(new{fixture.EventKey,fixture.Availability,scout});var evtId=db.SaveEvent(new(0,careerId,null,"PRE_MATCH_BRIEFING",timestamp,scout?.IsRival==true?72:48,"[]",metadata,summary,FactClassification.SaveFact));
+        var statusKey=availability.ToLowerInvariant();var notices=0;if(db.AddNotification(careerId,"Scouting",$"Briefing: {fixture.Opponent}",summary,"PreMatch",scout?.IsRival==true?80:60,$"prematch:{fixture.EventKey}:{statusKey}",timestamp))notices++;
         var active=db.GetCharacters(careerId).Where(IsActive).ToList();var manager=active.FirstOrDefault(x=>x.Type==CharacterType.Manager);var teammate=active.Where(x=>x.Type==CharacterType.Teammate).OrderByDescending(Overall).ThenBy(x=>x.Id).FirstOrDefault();
         if(managers&&manager is not null)
         {
-            var text=OfflineDialogueLibrary.PreMatch(manager,fixture,scout?.IsRival==true,threats.FirstOrDefault(),evtId.GetHashCode());
-            if(db.AddAutomaticReaction(careerId,manager.Id,evtId,SceneType.PreMatch,JsonSerializer.Serialize(new{automatic=true,eventId=evtId,fixture.EventKey}),text,58,20,"pre-match briefing","Manager",manager.Name,$"Messages:{manager.Id}",65,$"prematch-manager:{fixture.EventKey}:{manager.Id}",timestamp))notices++;
+            var text=OfflineDialogueLibrary.PreMatch(manager,fixture,scout?.IsRival==true,threats.FirstOrDefault(),evtId.GetHashCode(),availability);
+            if(db.AddAutomaticReaction(careerId,manager.Id,evtId,SceneType.PreMatch,JsonSerializer.Serialize(new{automatic=true,eventId=evtId,fixture.EventKey,availability}),text,58,20,"pre-match briefing","Manager",manager.Name,$"Messages:{manager.Id}",65,$"prematch-manager:{fixture.EventKey}:{manager.Id}:{statusKey}",timestamp))notices++;
         }
         if(teammates&&teammate is not null)
         {
-            var text=OfflineDialogueLibrary.PreMatch(teammate,fixture,scout?.IsRival==true,threats.FirstOrDefault(),evtId.GetHashCode());
-            if(db.AddAutomaticReaction(careerId,teammate.Id,evtId,SceneType.PreMatch,JsonSerializer.Serialize(new{automatic=true,eventId=evtId,fixture.EventKey}),text,48,30,"pre-match teammate message","Message",teammate.Name,$"Messages:{teammate.Id}",55,$"prematch-teammate:{fixture.EventKey}:{teammate.Id}",timestamp))notices++;
+            var text=OfflineDialogueLibrary.PreMatch(teammate,fixture,scout?.IsRival==true,threats.FirstOrDefault(),evtId.GetHashCode(),availability);
+            if(db.AddAutomaticReaction(careerId,teammate.Id,evtId,SceneType.PreMatch,JsonSerializer.Serialize(new{automatic=true,eventId=evtId,fixture.EventKey,availability}),text,48,30,"pre-match teammate message","Message",teammate.Name,$"Messages:{teammate.Id}",55,$"prematch-teammate:{fixture.EventKey}:{teammate.Id}:{statusKey}",timestamp))notices++;
         }
         return notices;
     }
+
+    private static string NormalizeAvailability(string value)=>value switch
+    {
+        "Selected" or "Benched" or "NotSelected" or "Injured" or "Suspended" or "Unavailable"=>value,
+        _=>"Unknown"
+    };
+    private static string AvailabilityText(string value)=>value switch
+    {
+        "Selected"=>"player selection explicitly confirmed",
+        "Benched"=>"player listed among substitutes, not confirmed to start",
+        "NotSelected"=>"player not selected or unavailable for this fixture",
+        "Injured"=>"player unavailable through injury",
+        "Suspended"=>"player unavailable through suspension",
+        "Unavailable"=>"player unavailable for this fixture",
+        _=>"player selection not confirmed by FIFA; playing time must not be assumed"
+    };
 
     public int ApplySquadChanges(long careerId,string sourceFingerprint,IReadOnlyList<Character> arrivals,IReadOnlyList<Character> departures,string careerDate,bool teammates=true)
     {

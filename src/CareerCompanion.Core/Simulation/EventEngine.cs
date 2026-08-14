@@ -13,9 +13,11 @@ public sealed class EventEngine
             0, careerId, matchId, type, now, Math.Clamp(importance, 1, 100), "[]",
             System.Text.Json.JsonSerializer.Serialize(meta ?? new { }), summary));
 
-        var result = match.TeamScore.CompareTo(match.OpponentScore);
-        Add(result > 0 ? "MATCH_WON" : result < 0 ? "MATCH_LOST" : "MATCH_DRAWN",
-            BaseImportance(match), $"{match.Competition}: {match.RepresentingTeam} {(match.IsHome ? "vs" : "at")} {match.Opponent}, {match.TeamScore}-{match.OpponentScore}.");
+        var result = match.ScoreKnown ? match.TeamScore.CompareTo(match.OpponentScore) : 0;
+        Add(match.ScoreKnown ? result > 0 ? "MATCH_WON" : result < 0 ? "MATCH_LOST" : "MATCH_DRAWN" : "MATCH_RECORDED",
+            BaseImportance(match), match.ScoreKnown
+                ? $"{match.Competition}: {match.RepresentingTeam} {(match.IsHome ? "vs" : "at")} {match.Opponent}, {match.ScoreLabel}."
+                : $"{match.Competition}: recorded an appearance for {match.RepresentingTeam} against {match.Opponent}.");
         if(match.TeamContext=="International")
         {
             var debut=!previousMatches.Any(x=>x.Input.TeamContext=="International");
@@ -32,10 +34,11 @@ public sealed class EventEngine
         if (match.StartedKnown) { if (match.Started) Add("PLAYER_STARTED", 8, "Started the match."); else Add("PLAYER_BENCHED", 25, "Began the match on the bench."); }
         if (match.PenaltyMissed) Add("PLAYER_MISSED_PENALTY", 55, "Missed a penalty.");
         if (match.IsDerby) Add("RIVAL_MATCH", 30 + BaseImportance(match), $"Played a rivalry match against {match.Opponent}.");
-        if (result < 0 && match.OpponentScore - match.TeamScore >= 3) Add("LARGE_DEFEAT", 78, "Suffered a heavy defeat.");
-        if (result > 0 && match.Notes.Contains("late", StringComparison.OrdinalIgnoreCase)) Add("LATE_WINNER", 85, "Won with a late goal.");
+        if (match.ScoreKnown&&result < 0 && match.OpponentScore - match.TeamScore >= 3) Add("LARGE_DEFEAT", 78, "Suffered a heavy defeat.");
+        if (match.ScoreKnown&&result > 0 && match.Notes.Contains("late", StringComparison.OrdinalIgnoreCase)) Add("LATE_WINNER", 85, "Won with a late goal.");
 
-        var outcomes = previousMatches.TakeLast(4).Select(x => x.Result).Append(result > 0 ? "W" : result < 0 ? "L" : "D").ToArray();
+        var currentOutcome=match.ScoreKnown?(result > 0 ? "W" : result < 0 ? "L" : "D"):"U";
+        var outcomes = previousMatches.TakeLast(4).Select(x => x.Result).Append(currentOutcome).ToArray();
         var wins = outcomes.Reverse().TakeWhile(x => x == "W").Count();
         var losses = outcomes.Reverse().TakeWhile(x => x == "L").Count();
         if (wins >= 3) Add("WINNING_STREAK", 40 + wins * 5, $"Extended the winning streak to {wins} matches.", new { length = wins });

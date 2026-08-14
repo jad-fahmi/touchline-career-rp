@@ -1,6 +1,7 @@
 using CareerCompanion.Core.Providers.Fifa18;
 using CareerCompanion.Core.Domain;
 using CareerCompanion.Core.Persistence;
+using CareerCompanion.Core.Services;
 using System.Text.Json;
 
 namespace CareerCompanion.Tests;
@@ -36,6 +37,24 @@ public sealed class Fifa18IntegrationTests : IDisposable
         var fixture=Fifa18CareerNormalizer.ParseFixturePreview("LaLiga Santander Preview: Real Madrid vs Valencia CF",20170827,"Real Madrid",243,"Varane will miss the match after his sending-off.");
         Assert.NotNull(fixture);Assert.True(fixture.IsHome);Assert.Equal("Valencia CF",fixture.Opponent);
         Assert.Equal("2017-08-27",fixture.Date);Assert.Equal("LaLiga Santander",fixture.Competition);Assert.Contains("Varane will miss",fixture.Evidence);
+    }
+
+    [Fact]
+    public void Fixture_does_not_claim_player_is_available_without_named_evidence()
+    {
+        var fixture=Fifa18CareerNormalizer.ParseFixturePreview("LaLiga Santander Preview: Real Madrid vs Valencia CF",20170827,"Real Madrid",243,
+            "Varane will miss the match after his sending-off.","Kaka");
+        Assert.NotNull(fixture);Assert.Equal("Unknown",fixture.Availability);
+    }
+
+    [Fact]
+    public void Fixture_marks_named_player_injury_and_selection_states()
+    {
+        var injured=Fifa18CareerNormalizer.ParseFixturePreview("LaLiga Santander Preview: Real Madrid vs Valencia CF",20170827,"Real Madrid",243,
+            "Kaka will miss the match after suffering an injury.","Kaka");
+        var benched=Fifa18CareerNormalizer.ParseFixturePreview("LaLiga Santander Preview: Real Madrid vs Valencia CF",20170827,"Real Madrid",243,
+            "Kaka is named among the substitutes.","Kaka");
+        Assert.Equal("Injured",injured?.Availability);Assert.Equal("Benched",benched?.Availability);
     }
 
     [Fact]
@@ -96,6 +115,14 @@ public sealed class Fifa18IntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Fixture_persists_player_availability()
+    {
+        Directory.CreateDirectory(_dir);var db=new Database(Path.Combine(_dir,"fixture-availability.db"));db.Migrate();var career=db.CreateCareer("s","p","n",18,"c","l","2017/18","ST",9,"2017-08-01");
+        db.UpsertFixture(career,"FIFA 18 Save","f1","2017-08-27","League","Valencia",true,90,"preview","a","Club","c","Injured");
+        Assert.Equal("Injured",Assert.Single(db.GetFixtures(career)).Availability);
+    }
+
+    [Fact]
     public void Superseded_played_fixture_can_be_completed()
     {
         Directory.CreateDirectory(_dir);var db=new Database(Path.Combine(_dir,"completed-fixture.db"));db.Migrate();var career=db.CreateCareer("s","p","n",18,"c","l","2017/18","ST",9);
@@ -111,6 +138,15 @@ public sealed class Fifa18IntegrationTests : IDisposable
         Directory.CreateDirectory(_dir);var db=new Database(Path.Combine(_dir,"provider-match.db"));db.Migrate();var career=db.CreateCareer("s","p","n",18,"c","l","2017/18","ST",9);var input=new MatchInput("2017-08-27","League","Valencia",true,2,1,true,90,1,0,7.5,false,false,false,false,"");
         var first=db.SaveProviderMatch(career,"FIFA 18 Save","event",input);var second=db.SaveProviderMatch(career,"FIFA 18 Save","event",input);
         Assert.True(first.Created);Assert.False(second.Created);Assert.Equal(first.MatchId,second.MatchId);Assert.Single(db.GetMatches(career));
+    }
+
+    [Fact]
+    public void Unknown_score_match_is_persisted_without_inventing_a_result()
+    {
+        Directory.CreateDirectory(_dir);var db=new Database(Path.Combine(_dir,"unknown-score.db"));db.Migrate();var career=db.CreateCareer("s","p","n",18,"c","l","2017/18","ST",9);
+        var input=new MatchInput("2017-08-27","Career match","Opponent unknown",true,0,0,false,66,1,0,7,false,false,false,false,"FIFA rating history",StartedKnown:false,ScoreKnown:false);
+        var result=new CareerService(db).ProcessMatch(career,input,"FIFA 18 Save","unknown-score-event");
+        Assert.False(result.Match.Input.ScoreKnown);Assert.Equal("U",result.Match.Result);Assert.Contains(result.Events,x=>x.Type=="MATCH_RECORDED");Assert.DoesNotContain(result.Events,x=>x.Type is "MATCH_WON" or "MATCH_LOST" or "MATCH_DRAWN");
     }
 
     [Fact]

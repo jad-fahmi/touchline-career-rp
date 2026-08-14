@@ -15,7 +15,7 @@ public sealed class Fifa18ImportService(Database db)
         ProviderCharacterSyncResult? squadResult=null;var worldUpdates=0;var before=db.GetCharacters(careerId).Where(x=>x.Type==CharacterType.Teammate&&IsProviderCharacter(x)&&IsActive(x)).ToList();var hadProviderSquad=before.Count>0;
         if(syncSquad)
         {
-            var facts=parsed.Squad.Select(x=>new ProviderCharacterFact(x.PlayerId.ToString(),x.Name,x.Age,x.Nationality,
+            var facts=parsed.Squad.Where(x=>x.PlayerId!=parsed.PlayerId).Select(x=>new ProviderCharacterFact(x.PlayerId.ToString(),x.Name,x.Age,x.Nationality,
                 parsed.ClubName,x.Position,"Squad member",CharacterType.Teammate,
                 JsonSerializer.Serialize(new{provider=ProviderName,playerId=x.PlayerId,shirtNumber=x.ShirtNumber,
                     overall=x.Overall,form=x.Form,injured=x.Injured,simulatedSquadRole=x.Overall>=85?"Key player":x.Overall>=78?"First team":"Squad member",classification=FactClassification.SaveFact.ToString()}),
@@ -30,8 +30,9 @@ public sealed class Fifa18ImportService(Database db)
         if(parsed.NextFixture is { } fixture)
         {
             db.UpsertFixture(careerId,ProviderName,fixture.EventKey,fixture.Date,fixture.Competition,fixture.Opponent,
-                fixture.IsHome,fixture.Confidence,fixture.Evidence,parsed.FileFingerprint,fixture.TeamContext,fixture.RepresentingTeam);
+                fixture.IsHome,fixture.Confidence,fixture.Evidence,parsed.FileFingerprint,fixture.TeamContext,fixture.RepresentingTeam,fixture.Availability);
             db.SetSetting($"career:{careerId}:next",fixture.Opponent);
+            db.SetSetting($"career:{careerId}:player_availability",parsed.PlayerAvailability);
             db.SetSetting($"career:{careerId}:opponent_scout",JsonSerializer.Serialize(parsed.OpponentScout));
             storedFixture=db.GetFixtures(careerId).First(x=>x.EventKey==fixture.EventKey);
             fixtureUpdated=true;

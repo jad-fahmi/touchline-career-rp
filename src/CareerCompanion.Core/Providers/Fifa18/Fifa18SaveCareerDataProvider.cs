@@ -28,7 +28,7 @@ public sealed class Fifa18SaveCareerDataProvider(Database db) : ICareerDataProvi
             x.Position,"Squad member",CharacterType.Teammate,JsonSerializer.Serialize(new{provider=Name,playerId=x.PlayerId,
                 overall=x.Overall,form=x.Form,injured=x.Injured,shirtNumber=x.ShirtNumber,classification=FactClassification.SaveFact.ToString()}),
             JsonSerializer.Serialize(Personality.Balanced),JsonSerializer.Serialize(CommunicationStyle.Balanced),"")).ToList();
-        IReadOnlyList<CareerMatch> matches=parsed.LatestMatch is null?Array.Empty<CareerMatch>():[new CareerMatch(0,careerId,parsed.LatestMatch.ToMatchInput(),parsed.LatestMatch.TeamScore>parsed.LatestMatch.OpponentScore?"W":parsed.LatestMatch.TeamScore<parsed.LatestMatch.OpponentScore?"L":"D",parsed.CapturedAt)];
+        IReadOnlyList<CareerMatch> matches=parsed.LatestMatch is null?Array.Empty<CareerMatch>():[new CareerMatch(0,careerId,parsed.LatestMatch.ToMatchInput(),parsed.LatestMatch.ScoreKnown?(parsed.LatestMatch.TeamScore>parsed.LatestMatch.OpponentScore?"W":parsed.LatestMatch.TeamScore<parsed.LatestMatch.OpponentScore?"L":"D"):"U",parsed.CapturedAt)];
         return new(career,squad,matches,parsed.CapturedAt,Name);
     }
 }

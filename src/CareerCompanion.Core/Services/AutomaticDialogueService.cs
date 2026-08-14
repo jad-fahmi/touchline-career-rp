@@ -27,7 +27,7 @@ public sealed class AutomaticDialogueService(Database db,ILlmProvider llm)
                 var instruction=$"Initiate one natural private message to {career.PlayerName} in direct reaction to this career event: {evt.Summary} Treat FIFA facts as objective and emotional state as a private simulation signal. Stay in character, avoid diagnosing a medical condition, and do not announce that you are a simulation.";
                 var model=premiumRouting&&evt.Importance>=75?premiumModel:defaultModel;
                 var request=new PromptBuilder().Character(character,career,relationship,scene,memories,[evt],history,instruction,model,db.GetCharacterState(characterId),db.GetPlayerState(careerId)) with{MaxOutputTokens=180,Creativity=.75};
-                var result=await llm.GenerateAsync(request,ct);var text=result.Text.Trim();if(string.IsNullOrWhiteSpace(text))throw new LlmUnavailableException("The automatic reaction was empty.");
+                var result=await llm.GenerateAsync(request,ct);var text=result.Text.Trim();if(!DialogueResponseGuard.IsUsable(text)){db.Log("automatic_generation",$"Job {job.Id} returned a prompt echo or malformed dialogue; keeping the grounded offline reaction.");db.CompleteGenerationJob(job.Id);continue;}
                 db.ReplaceAutomaticReactionText(careerId,conversationId,characterId,eventId,notificationKey,text);db.AddUsage(llm.Name,model,result.InputTokens,result.OutputTokens);db.CompleteGenerationJob(job.Id);completed++;
             }
             catch(OperationCanceledException){throw;}

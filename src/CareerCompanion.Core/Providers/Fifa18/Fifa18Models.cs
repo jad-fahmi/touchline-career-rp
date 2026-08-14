@@ -38,10 +38,11 @@ public sealed record Fifa18DetectedMatch(
     string RepresentingTeam = "",
     bool ScoreKnown = true)
 {
+    public string ScoreLabel => ScoreKnown ? $"{TeamScore}-{OpponentScore}" : "Score unknown";
     public MatchInput ToMatchInput() => new(Date, Competition, Opponent, IsHome,
         TeamScore, OpponentScore, Started, Minutes, Goals, Assists, Rating,
         YellowCard, RedCard, false, false, Evidence,StartedKnown:StartedKnown,
-        TeamContext:TeamContext,RepresentingTeam:RepresentingTeam);
+        TeamContext:TeamContext,RepresentingTeam:RepresentingTeam,ScoreKnown:ScoreKnown);
 }
 
 public sealed record Fifa18SquadMember(
@@ -64,7 +65,8 @@ public sealed record Fifa18DetectedFixture(
     int Confidence,
     string Evidence,
     string TeamContext = "Club",
-    string RepresentingTeam = "");
+    string RepresentingTeam = "",
+    string Availability = "Unknown");
 
 public sealed record Fifa18WorldNews(string EventKey,string Date,string Title,string Body,int Importance);
 public sealed record Fifa18ScoutPlayer(string Name,string Position,int Overall);
@@ -103,7 +105,8 @@ public sealed record Fifa18ParsedCareer(
     bool PlayerInjuryKnown = false,
     int NationalTeamId = -1,
     string NationalTeamName = "",
-    Fifa18OpponentScout? OpponentScout = null);
+    Fifa18OpponentScout? OpponentScout = null,
+    string PlayerAvailability = "Unknown");
 
 public enum Fifa18ScanDisposition { MatchDetected, MatchAutoImported, NoNewMatch, CareerMismatch, NoCareerSelected }
 public sealed record Fifa18ScanResult(Fifa18ScanDisposition Disposition, Fifa18ParsedCareer Parsed, string Message);
