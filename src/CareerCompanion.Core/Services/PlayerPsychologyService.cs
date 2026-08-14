@@ -54,7 +54,7 @@ public sealed class PlayerPsychologyService(Database db)
     {
         var supporters=SelectSupporters(match.CareerId,teammates,managers);var count=severity>=22?Math.Min(2,supporters.Count):Math.Min(1,supporters.Count);var created=0;foreach(var person in supporters.Take(count))
         {
-            var text=SupportText(person,severity,match.Input.Opponent);var context=JsonSerializer.Serialize(new{automatic=true,eventId,privateSupport=true,playerMood=state.Mood});if(db.AddAutomaticReaction(match.CareerId,person.Id,eventId,SceneType.PrivateMessage,context,text,72,severity>=22?45:30,"private wellbeing check-in",person.Type==CharacterType.Manager?"Manager":"Message",person.Name,$"Messages:{person.Id}",Math.Clamp(65+severity,65,95),$"wellbeing-support:{match.Id}:{person.Id}",state.UpdatedAt))created++;
+            var text=OfflineDialogueLibrary.Support(person,severity,match.Input.Opponent,eventId.GetHashCode());var context=JsonSerializer.Serialize(new{automatic=true,eventId,privateSupport=true,playerMood=state.Mood});if(db.AddAutomaticReaction(match.CareerId,person.Id,eventId,SceneType.PrivateMessage,context,text,72,severity>=22?45:30,"private wellbeing check-in",person.Type==CharacterType.Manager?"Manager":"Message",person.Name,$"Messages:{person.Id}",Math.Clamp(65+severity,65,95),$"wellbeing-support:{match.Id}:{person.Id}",state.UpdatedAt))created++;
         }
         return created;
     }

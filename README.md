@@ -94,15 +94,21 @@ The home dashboard also maintains the player's private mental state. A routine d
 
 Save files are opened read-only after their size and timestamp settle. Touchline writes only to its own SQLite database. Each imported FIFA event has a stable provider key and a source fingerprint, so rescanning the same result does not create a duplicate. Keep using FIFA's normal save and backup practices; no third-party tool can guarantee recovery from a corrupted game save.
 
-## OpenAI configuration
+## AI provider configuration
 
 The application remains useful without an API key. Career entry, SQLite, deterministic events, squad management, offline media, timeline, press statement storage, debug tools, and backup remain available.
 
 For character messages, journalist follow-ups, and richer automatic incoming reactions:
 
 1. Open Settings.
-2. Paste an OpenAI API key and choose default/premium models.
+2. Paste an API key and choose default/premium models.
 3. Save settings. The key is encrypted with Windows DPAPI for the current Windows user and is never logged.
+
+OpenAI is used for models such as `gpt-5.4`. Claude is selected automatically when the chosen model starts with `claude-`, for example `claude-sonnet-4-20250514`. When saving a Claude model, the API key is stored separately and sent to Anthropic's Messages API. `ANTHROPIC_API_KEY` can also be used as an environment variable.
+
+Ollama is the completely local, no-key option. Install Ollama, run `ollama pull qwen2.5:7b`, then enter `ollama:qwen2.5:7b` as both model settings and save without an API key. The app calls Ollama at `http://localhost:11434/api`.
+
+If no provider is available, the offline dialogue library remains active. It covers direct conversations, selection and benching, training, injuries, transfers, international duty, wins, defeats, draws, cards, penalties, records, pre-match briefings, squad arrivals, wellbeing check-ins, press statements, and post-match interviews. Responses are selected from character-aware, scene-aware variants and stored normally in the career history.
 
 For development, `OPENAI_API_KEY`, `OPENAI_DEFAULT_MODEL`, and `OPENAI_PREMIUM_MODEL` environment variables are also recognized; see `.env.example`. `TOUCHLINE_DATA_DIR` can point a development or smoke-test run at an isolated database directory. No dotenv file is automatically loaded. The REST contract follows the official [Responses API structured-output format](https://developers.openai.com/api/docs/guides/structured-outputs).
 
