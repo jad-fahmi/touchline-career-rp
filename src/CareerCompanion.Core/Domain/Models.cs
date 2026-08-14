@@ -78,9 +78,13 @@ public sealed record Memory(long Id, long CareerId, long CharacterId, long? Even
     DateTime? LastRecalled, bool IsCompressed = false);
 public sealed record Narrative(long Id, long CareerId, string Type, int Strength, string Status,
     DateTime LastUpdated, string EvidenceJson);
-public sealed record ConversationMessage(string Role, string Content, DateTime Timestamp)
+public sealed record ConversationMessage(string Role, string Content, DateTime Timestamp, long ConversationId = 0, string Scene = "", DateTime ConversationStartedAt = default, string? ReplyToPreview = null)
 {
     public string DisplayRole=>Role.ToLowerInvariant() switch{"user"=>"YOU","assistant"=>"INCOMING","journalist"=>"JOURNALIST",_=>Role.ToUpperInvariant()};
+    public string DisplayTimestamp=>Timestamp==default?"":Timestamp.ToString("dd MMM yyyy HH:mm");
+    public string ConversationContext=>string.IsNullOrWhiteSpace(Scene)?"Conversation":$"{FormatScene(Scene)} | {(ConversationStartedAt==default?Timestamp:ConversationStartedAt):dd MMM yyyy HH:mm}";
+    public string ReplyContext=>string.IsNullOrWhiteSpace(ReplyToPreview)?"":$"Replying to: {ReplyToPreview}";
+    private static string FormatScene(string scene)=>scene switch{"PrivateMessage"=>"Private message","DressingRoom"=>"Dressing room","TrainingGround"=>"Training ground","PostMatch"=>"Post-match","PreMatch"=>"Pre-match","PressConference"=>"Press conference","ManagerOffice"=>"Manager office","TransferDiscussion"=>"Transfer discussion","Casual"=>"Casual",_=>scene.Replace('_',' ')};
 }
 public sealed record NewsItem(long Id, long CareerId, long? EventId, string Outlet, string Headline,
     string Body, string Sentiment, int Importance, DateTime PublishedAt);

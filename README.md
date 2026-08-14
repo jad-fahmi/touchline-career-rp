@@ -108,6 +108,8 @@ OpenAI is used for models such as `gpt-5.4`. Claude is selected automatically wh
 
 Ollama is the completely local, no-key option. Install Ollama, run `ollama pull qwen2.5:7b`, then enter `ollama:qwen2.5:7b` as both model settings and save without an API key. The app calls Ollama at `http://localhost:11434/api`.
 
+Models prefixed with `compatible:` use the configurable OpenAI-compatible Chat Completions endpoint. Set the endpoint in Settings, for example `https://openrouter.ai/api/v1` or `http://localhost:1234/v1`, select a compatible model, and paste the relevant key if the endpoint needs one. This supports OpenRouter, LM Studio, KoboldCpp, Groq, Together, LiteLLM, and similar gateways.
+
 If no provider is available, the offline dialogue library remains active. It covers direct conversations, selection and benching, training, injuries, transfers, international duty, wins, defeats, draws, cards, penalties, records, pre-match briefings, squad arrivals, wellbeing check-ins, press statements, and post-match interviews. Its combinatorial direct-message generator produces over 100,000 deterministic grounded variants from reusable dialogue components, so the repository does not need 100,000 copied paragraphs. Responses are selected from character-aware, scene-aware variants and stored normally in the career history.
 
 For development, `OPENAI_API_KEY`, `OPENAI_DEFAULT_MODEL`, and `OPENAI_PREMIUM_MODEL` environment variables are also recognized; see `.env.example`. `TOUCHLINE_DATA_DIR` can point a development or smoke-test run at an isolated database directory. No dotenv file is automatically loaded. The REST contract follows the official [Responses API structured-output format](https://developers.openai.com/api/docs/guides/structured-outputs).

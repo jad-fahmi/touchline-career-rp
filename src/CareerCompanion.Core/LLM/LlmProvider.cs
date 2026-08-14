@@ -54,6 +54,36 @@ public sealed class OllamaProvider(HttpClient client,string model):ILlmProvider
     }
 }
 
+public sealed class OpenAICompatibleProvider(HttpClient client,string endpoint,Func<string?> keyProvider):ILlmProvider
+{
+    public string Name=>"OpenAI-compatible";
+    public async Task<GenerationResult> GenerateAsync(LlmRequest request,CancellationToken cancellationToken=default)
+    {
+        var url=NormalizeEndpoint(endpoint);if(string.IsNullOrWhiteSpace(url))throw new LlmUnavailableException("No compatible API endpoint is configured.");
+        var key=keyProvider();var instruction="Return only valid JSON with exactly these fields: dialogue (string), mood (string), relationshipDelta (integer from -5 to 5), trustDelta (integer from -5 to 5), respectDelta (integer from -5 to 5), newMemories (array of strings). Do not use markdown fences.";
+        var model=request.Model.StartsWith("compatible:",StringComparison.OrdinalIgnoreCase)?request.Model["compatible:".Length..].Trim():request.Model;var body=new{model,messages=new[]{new{role="system",content=request.SystemPrompt+"\n\n"+instruction},new{role="user",content=request.UserPrompt}},max_tokens=request.MaxOutputTokens,temperature=request.Creativity};
+        using var message=new HttpRequestMessage(HttpMethod.Post,url);if(!string.IsNullOrWhiteSpace(key))message.Headers.Authorization=new AuthenticationHeaderValue("Bearer",key);message.Content=new StringContent(JsonSerializer.Serialize(body),Encoding.UTF8,"application/json");
+        HttpResponseMessage response;try{response=await client.SendAsync(message,cancellationToken);}catch(OperationCanceledException e){throw new LlmUnavailableException("Compatible API generation timed out or was cancelled.",e);}catch(HttpRequestException e){throw new LlmUnavailableException("Could not reach the compatible API endpoint.",e);}
+        var raw=await response.Content.ReadAsStringAsync(cancellationToken);if(response.StatusCode==(HttpStatusCode)429)throw new LlmRateLimitException("Compatible API rate limit reached. Try again later.");if(!response.IsSuccessStatusCode)throw new LlmUnavailableException($"Compatible API returned {(int)response.StatusCode}. Check the endpoint, key, and model.");
+        try
+        {
+            using var doc=JsonDocument.Parse(raw);var root=doc.RootElement;
+            if(root.TryGetProperty("error",out var apiError))throw new LlmUnavailableException($"Compatible API error: {ReadError(apiError)}");
+            if(!root.TryGetProperty("choices",out var choices)||choices.ValueKind!=JsonValueKind.Array||choices.GetArrayLength()==0)throw new LlmUnavailableException("Compatible API returned no choices.");
+            var choice=choices[0];var text=ReadContent(choice);
+            if(string.IsNullOrWhiteSpace(text))throw new LlmUnavailableException($"Compatible API returned empty content{(choice.TryGetProperty("finish_reason",out var finish)?$" (finish reason: {finish.GetString()})":"") }.");
+            var usage=root.TryGetProperty("usage",out var u)?u:default;var inputTokens=usage.ValueKind==JsonValueKind.Object&&usage.TryGetProperty("prompt_tokens",out var pt)?pt.GetInt32():0;var outputTokens=usage.ValueKind==JsonValueKind.Object&&usage.TryGetProperty("completion_tokens",out var ct)?ct.GetInt32():0;
+            try{using var result=JsonDocument.Parse(ExtractJson(text));var x=result.RootElement;return new(x.GetProperty("dialogue").GetString()??text,x.TryGetProperty("mood",out var mood)?mood.GetString()??"neutral":"neutral",x.TryGetProperty("relationshipDelta",out var relationship)?relationship.GetInt32():0,x.TryGetProperty("trustDelta",out var trust)?trust.GetInt32():0,x.TryGetProperty("respectDelta",out var respect)?respect.GetInt32():0,x.TryGetProperty("newMemories",out var memories)&&memories.ValueKind==JsonValueKind.Array?memories.EnumerateArray().Select(v=>v.GetString()??"").Where(v=>v.Length>0).ToList():[],inputTokens,outputTokens,raw);}catch(Exception e) when(e is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException or ArgumentOutOfRangeException){return new(text.Trim(),"neutral",0,0,0,[],inputTokens,outputTokens,raw);}
+        }
+        catch(LlmUnavailableException){throw;}
+        catch(Exception e) when(e is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException or ArgumentOutOfRangeException){throw new LlmUnavailableException("Compatible API returned an unreadable response envelope.",e);}
+    }
+    private static string ReadContent(JsonElement choice){if(choice.TryGetProperty("message",out var message)){if(message.TryGetProperty("content",out var content)){if(content.ValueKind==JsonValueKind.String)return content.GetString()??"";if(content.ValueKind==JsonValueKind.Array)return string.Join("",content.EnumerateArray().Where(x=>x.TryGetProperty("text",out _)).Select(x=>x.GetProperty("text").GetString()??""));}if(message.TryGetProperty("reasoning",out var reasoning)&&reasoning.ValueKind==JsonValueKind.String)return reasoning.GetString()??"";}return choice.TryGetProperty("text",out var text)&&text.ValueKind==JsonValueKind.String?text.GetString()??"":"";}
+    private static string ReadError(JsonElement error){if(error.ValueKind==JsonValueKind.String)return error.GetString()??"unknown error";return error.TryGetProperty("message",out var message)?message.GetString()??"unknown error":error.ToString();}
+    private static string NormalizeEndpoint(string endpoint){var value=endpoint.Trim().TrimEnd('/');if(value.EndsWith("/chat/completions",StringComparison.OrdinalIgnoreCase))return value;if(value.EndsWith("/v1",StringComparison.OrdinalIgnoreCase))return value+"/chat/completions";return value+"/v1/chat/completions";}
+    private static string ExtractJson(string text){var value=text.Trim();if(value.StartsWith("```")&&value.EndsWith("```")){var first=value.IndexOf('\n');value=first>=0?value[(first+1)..^3].Trim():value.Trim('`');}var start=value.IndexOf('{');var end=value.LastIndexOf('}');return start>=0&&end>start?value[start..(end+1)]:value;}
+}
+
 public sealed class OfflineLlmProvider:ILlmProvider
 {
     public string Name=>"Offline";

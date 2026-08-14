@@ -78,7 +78,97 @@
           <Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="ADD A CHARACTER" Style="{StaticResource Label}"/><UniformGrid Columns="3"><StackPanel><TextBlock Text="Name" Style="{StaticResource Label}"/><TextBox Text="{Binding CharacterName}"/><TextBlock Text="Age" Style="{StaticResource Label}"/><TextBox Text="{Binding CharacterAge}"/></StackPanel><StackPanel><TextBlock Text="Nationality" Style="{StaticResource Label}"/><TextBox Text="{Binding CharacterNationality}"/><TextBlock Text="Position" Style="{StaticResource Label}"/><TextBox Text="{Binding CharacterPosition}"/></StackPanel><StackPanel><TextBlock Text="Role" Style="{StaticResource Label}"/><TextBox Text="{Binding CharacterRole}"/><TextBlock Text="Type" Style="{StaticResource Label}"/><ComboBox ItemsSource="{Binding CharacterTypes}" SelectedItem="{Binding CharacterType}"/></StackPanel></UniformGrid><Button Content="ADD CHARACTER" Click="AddCharacter_Click" Width="170" HorizontalAlignment="Left"/></StackPanel></Border>
         </StackPanel></ScrollViewer>
 
-        <ScrollViewer x:Name="MessagesPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock Text="Messages" Style="{StaticResource Heading}"/><TextBlock Text="{Binding MessageInboxSummary}" Foreground="{StaticResource Muted}" Margin="0,-10,0,12" TextWrapping="Wrap"/><Border Style="{StaticResource Card}"><StackPanel><ComboBox ItemsSource="{Binding Characters}" SelectedItem="{Binding SelectedCharacter}"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate></ComboBox><ItemsControl ItemsSource="{Binding Messages}"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource Panel2}" BorderBrush="{StaticResource Stroke}" BorderThickness="1" Padding="12" Margin="0,4"><StackPanel><TextBlock Text="{Binding DisplayRole}" Foreground="{StaticResource Accent}" FontSize="11"/><TextBlock Text="{Binding Content}" TextWrapping="Wrap"/></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><TextBox Text="{Binding MessageText}" AcceptsReturn="True" MinHeight="70"/><StackPanel Orientation="Horizontal"><ComboBox ItemsSource="{Binding SceneTypes}" SelectedItem="{Binding SelectedScene}" Width="210"/><Button Content="SEND" Click="SendMessage_Click" Width="110"/></StackPanel><TextBlock Text="{Binding MessageGenerationStatus}" Foreground="{StaticResource Muted}"/></StackPanel></Border></StackPanel></ScrollViewer>
+        <ScrollViewer x:Name="MessagesPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+          <StackPanel>
+            <TextBlock Text="Messages" Style="{StaticResource Heading}"/>
+            <TextBlock Text="{Binding MessageInboxSummary}" Foreground="{StaticResource Muted}" Margin="0,-10,0,12" TextWrapping="Wrap"/>
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="Conversation with" Style="{StaticResource Label}"/>
+                <ComboBox ItemsSource="{Binding Characters}" SelectedItem="{Binding SelectedCharacter}">
+                  <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="Your messages sit on the right. Replies sit on the left." Foreground="{StaticResource Muted}" FontSize="11" Margin="0,6,0,10"/>
+                <ItemsControl ItemsSource="{Binding Messages}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,5">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" MaxWidth="650" HorizontalAlignment="Left" CornerRadius="12" Padding="14,10">
+                          <Border.Style>
+                            <Style TargetType="Border">
+                              <Setter Property="Background" Value="{StaticResource Panel2}"/>
+                              <Setter Property="BorderBrush" Value="{StaticResource Stroke}"/>
+                              <Setter Property="BorderThickness" Value="1"/>
+                              <Setter Property="TextElement.Foreground" Value="{StaticResource Text}"/>
+                              <Style.Triggers>
+                                <DataTrigger Binding="{Binding Role}" Value="user">
+                                  <Setter Property="Grid.Column" Value="2"/>
+                                  <Setter Property="HorizontalAlignment" Value="Right"/>
+                                  <Setter Property="Background" Value="{StaticResource Interactive}"/>
+                                  <Setter Property="BorderBrush" Value="{StaticResource Interactive}"/>
+                                  <Setter Property="TextElement.Foreground" Value="{StaticResource Bg}"/>
+                                </DataTrigger>
+                              </Style.Triggers>
+                            </Style>
+                          </Border.Style>
+                          <StackPanel>
+                            <DockPanel LastChildFill="False">
+                              <TextBlock Text="{Binding DisplayRole}" FontWeight="Bold" FontSize="11">
+                                <TextBlock.Style>
+                                  <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+                                    <Style.Triggers><DataTrigger Binding="{Binding Role}" Value="user"><Setter Property="Foreground" Value="{StaticResource Bg}"/></DataTrigger></Style.Triggers>
+                                  </Style>
+                                </TextBlock.Style>
+                              </TextBlock>
+                              <TextBlock DockPanel.Dock="Right" Text="{Binding DisplayTimestamp}" FontSize="11" Margin="12,0,0,0">
+                                <TextBlock.Style>
+                                  <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+                                    <Style.Triggers><DataTrigger Binding="{Binding Role}" Value="user"><Setter Property="Foreground" Value="{StaticResource Bg}"/></DataTrigger></Style.Triggers>
+                                  </Style>
+                                </TextBlock.Style>
+                              </TextBlock>
+                            </DockPanel>
+                            <TextBlock Text="{Binding ConversationContext}" FontSize="10" Margin="0,2,0,0">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+                                  <Style.Triggers><DataTrigger Binding="{Binding Role}" Value="user"><Setter Property="Foreground" Value="{StaticResource Bg}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding ReplyContext}" FontSize="11" FontStyle="Italic" TextWrapping="Wrap" Margin="0,6,0,0">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+                                  <Style.Triggers><DataTrigger Binding="{Binding Role}" Value="user"><Setter Property="Foreground" Value="{StaticResource Bg}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding Content}" TextWrapping="Wrap" Margin="0,5,0,0">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                                  <Style.Triggers><DataTrigger Binding="{Binding Role}" Value="user"><Setter Property="Foreground" Value="{StaticResource Bg}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
+                          </StackPanel>
+                        </Border>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="Write a new message" Style="{StaticResource Label}" Margin="0,12,0,4"/>
+                <TextBox Text="{Binding MessageText}" AcceptsReturn="True" MinHeight="70"/>
+                <StackPanel Orientation="Horizontal"><ComboBox ItemsSource="{Binding SceneTypes}" SelectedItem="{Binding SelectedScene}" Width="210"/><Button Content="SEND" Click="SendMessage_Click" Width="110"/></StackPanel>
+                <TextBlock Text="{Binding MessageGenerationStatus}" Foreground="{StaticResource Muted}"/>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
 
         <ScrollViewer x:Name="ManagerPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock Text="Manager office" Style="{StaticResource Heading}"/><Border Style="{StaticResource Card}" Background="{StaticResource Panel2}"><StackPanel><TextBlock Text="CURRENT MANAGER" Style="{StaticResource Label}"/><TextBlock Text="{Binding ManagerName}" FontSize="30" FontWeight="Bold"/><TextBlock Text="{Binding ManagerRelationship}" Foreground="{StaticResource Accent}" Margin="0,5,0,0"/></StackPanel></Border><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="OFFICE BRIEFING" Style="{StaticResource Label}"/><TextBlock Text="{Binding ManagerBriefing}" FontSize="17" TextWrapping="Wrap" Margin="0,7,0,12"/><Button Content="REQUEST A MEETING" Click="TalkManager_Click" Width="190" HorizontalAlignment="Left"/><TextBlock Text="Touchline automatically adds the verified FIFA club manager and sends grounded reactions after important matches." Foreground="{StaticResource Muted}" TextWrapping="Wrap"/></StackPanel></Border><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="REPRESENTATIVE" Style="{StaticResource Label}"/><TextBlock Text="{Binding AgentName}" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="Your FIFA agent is synchronized when the save exposes a name." Foreground="{StaticResource Muted}"/><Button Content="CONTACT AGENT" Click="TalkAgent_Click" Width="170" HorizontalAlignment="Left" Style="{StaticResource SecondaryButton}"/></StackPanel></Border></StackPanel></ScrollViewer>
         <ScrollViewer x:Name="PressPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock Text="Post-match interview" Style="{StaticResource Heading}"/>
@@ -90,7 +180,7 @@
         <ScrollViewer x:Name="SocialPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock Text="Social" Style="{StaticResource Heading}"/><ItemsControl ItemsSource="{Binding Social}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}"><StackPanel><DockPanel><TextBlock Text="{Binding Author}" Foreground="{StaticResource Accent}" FontWeight="SemiBold"/><TextBlock DockPanel.Dock="Right" Text="{Binding PublishedAt,StringFormat={}{0:dd MMM yyyy}}" Foreground="{StaticResource Muted}" FontSize="11"/></DockPanel><TextBlock Text="{Binding Persona}" Style="{StaticResource Label}"/><TextBlock Text="{Binding Content}" TextWrapping="Wrap" Margin="0,7,0,0"/></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></ScrollViewer>
         <ScrollViewer x:Name="TimelinePage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock Text="Career timeline" Style="{StaticResource Heading}"/><ItemsControl ItemsSource="{Binding Events}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Timestamp,StringFormat={}{0:dd MMM yyyy}}" Foreground="{StaticResource Muted}"/><StackPanel Grid.Column="1"><TextBlock Text="{Binding Type}" FontWeight="SemiBold"/><TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Foreground="{StaticResource Muted}"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Importance}" Foreground="{StaticResource Accent}" HorizontalAlignment="Right"/></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></ScrollViewer>
 
-        <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="780" HorizontalAlignment="Left"><TextBlock Text="Settings" Style="{StaticResource Heading}"/><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="AI PROVIDER" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="API key (encrypted for this Windows user, leave blank for Ollama)" Style="{StaticResource Label}"/><PasswordBox x:Name="ApiKeyBox"/><TextBlock Text="Choose a model below. Ollama models run locally with no API key; OpenAI and Claude use their corresponding API keys." Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,8"/><TextBlock Text="Default / premium model" Style="{StaticResource Label}"/><StackPanel Orientation="Horizontal"><ComboBox Width="250" ItemsSource="{Binding AvailableModels}" SelectedItem="{Binding DefaultModel,Mode=TwoWay}"/><ComboBox Width="250" Margin="8,0,0,0" ItemsSource="{Binding AvailableModels}" SelectedItem="{Binding PremiumModel,Mode=TwoWay}"/></StackPanel><CheckBox Content="Use premium model for major events" IsChecked="{Binding PremiumRouting}"/><Button Content="SAVE LLM SETTINGS" Click="SaveSettings_Click" Width="190" HorizontalAlignment="Left"/></StackPanel></Border><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="Generation" FontSize="18" FontWeight="SemiBold"/><CheckBox Content="Automatic teammate reactions" IsChecked="{Binding AutoTeammates}"/><CheckBox Content="Automatic manager reactions" IsChecked="{Binding AutoManager}"/><CheckBox Content="Automatic news" IsChecked="{Binding AutoNews}"/><CheckBox Content="Automatic social posts" IsChecked="{Binding AutoSocial}"/><CheckBox Content="Automatic press prompts" IsChecked="{Binding AutoPress}"/><CheckBox Content="Developer/debug mode" IsChecked="{Binding DebugMode}"/><Button Content="SAVE PREFERENCES" Click="SaveSettings_Click" Width="190" HorizontalAlignment="Left"/></StackPanel></Border><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="Backup" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="Creates a consistent portable SQLite backup of every career." Foreground="{StaticResource Muted}"/><Button Content="EXPORT BACKUP" Click="Backup_Click" Width="170" HorizontalAlignment="Left"/></StackPanel></Border></StackPanel></ScrollViewer>
+        <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="780" HorizontalAlignment="Left"><TextBlock Text="Settings" Style="{StaticResource Heading}"/><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="AI PROVIDER" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="API key (encrypted for this Windows user, leave blank for Ollama or local endpoints)" Style="{StaticResource Label}"/><PasswordBox x:Name="ApiKeyBox"/><TextBlock Text="Choose a model below. OpenRouter models automatically use https://openrouter.ai/api/v1. The endpoint is shown below so you can use another compatible service when needed. Premium routing uses the premium model for major events, but it stays on your OpenRouter model when the premium choice has no matching provider key." Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,8"/><TextBlock Text="Default / premium model" Style="{StaticResource Label}"/><StackPanel Orientation="Horizontal"><ComboBox Width="250" ItemsSource="{Binding AvailableModels}" SelectedItem="{Binding DefaultModel,Mode=TwoWay}"/><ComboBox Width="250" Margin="8,0,0,0" ItemsSource="{Binding AvailableModels}" SelectedItem="{Binding PremiumModel,Mode=TwoWay}"/></StackPanel><TextBlock Text="OpenAI-compatible endpoint" Style="{StaticResource Label}" Margin="0,10,0,0"/><TextBox Text="{Binding CompatibleEndpoint,UpdateSourceTrigger=PropertyChanged}" ToolTip="Examples: https://openrouter.ai/api/v1 or http://localhost:1234/v1"/><CheckBox Content="Use premium model for major events" IsChecked="{Binding PremiumRouting}"/><Button Content="SAVE LLM SETTINGS" Click="SaveSettings_Click" Width="190" HorizontalAlignment="Left"/></StackPanel></Border><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="Generation" FontSize="18" FontWeight="SemiBold"/><CheckBox Content="Automatic teammate reactions" IsChecked="{Binding AutoTeammates}"/><CheckBox Content="Automatic manager reactions" IsChecked="{Binding AutoManager}"/><CheckBox Content="Automatic news" IsChecked="{Binding AutoNews}"/><CheckBox Content="Automatic social posts" IsChecked="{Binding AutoSocial}"/><CheckBox Content="Automatic press prompts" IsChecked="{Binding AutoPress}"/><CheckBox Content="Developer/debug mode" IsChecked="{Binding DebugMode}"/><Button Content="SAVE PREFERENCES" Click="SaveSettings_Click" Width="190" HorizontalAlignment="Left"/></StackPanel></Border><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="Backup" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="Creates a consistent portable SQLite backup of every career." Foreground="{StaticResource Muted}"/><Button Content="EXPORT BACKUP" Click="Backup_Click" Width="170" HorizontalAlignment="Left"/></StackPanel></Border></StackPanel></ScrollViewer>
         <ScrollViewer x:Name="DebugPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock Text="Simulation inspector" Style="{StaticResource Heading}"/><Border Style="{StaticResource Card}"><TextBox Text="{Binding DebugText, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" MinHeight="500" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/></Border></StackPanel></ScrollViewer>
       </Grid>
     </Grid>
