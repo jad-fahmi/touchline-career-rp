@@ -73,13 +73,42 @@ public sealed class OpenAICompatibleProvider(HttpClient client,string endpoint,F
             var choice=choices[0];var text=ReadContent(choice);
             if(string.IsNullOrWhiteSpace(text))throw new LlmUnavailableException($"Compatible API returned empty content{(choice.TryGetProperty("finish_reason",out var finish)?$" (finish reason: {finish.GetString()})":"") }.");
             var usage=root.TryGetProperty("usage",out var u)?u:default;var inputTokens=usage.ValueKind==JsonValueKind.Object&&usage.TryGetProperty("prompt_tokens",out var pt)?pt.GetInt32():0;var outputTokens=usage.ValueKind==JsonValueKind.Object&&usage.TryGetProperty("completion_tokens",out var ct)?ct.GetInt32():0;
-            try{using var result=JsonDocument.Parse(ExtractJson(text));var x=result.RootElement;return new(x.GetProperty("dialogue").GetString()??text,x.TryGetProperty("mood",out var mood)?mood.GetString()??"neutral":"neutral",x.TryGetProperty("relationshipDelta",out var relationship)?relationship.GetInt32():0,x.TryGetProperty("trustDelta",out var trust)?trust.GetInt32():0,x.TryGetProperty("respectDelta",out var respect)?respect.GetInt32():0,x.TryGetProperty("newMemories",out var memories)&&memories.ValueKind==JsonValueKind.Array?memories.EnumerateArray().Select(v=>v.GetString()??"").Where(v=>v.Length>0).ToList():[],inputTokens,outputTokens,raw);}catch(Exception e) when(e is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException or ArgumentOutOfRangeException){return new(text.Trim(),"neutral",0,0,0,[],inputTokens,outputTokens,raw);}
+            try
+            {
+                using var result=JsonDocument.Parse(ExtractJson(text));var x=result.RootElement;return new(x.GetProperty("dialogue").GetString()??"",x.TryGetProperty("mood",out var mood)?mood.GetString()??"neutral":"neutral",x.TryGetProperty("relationshipDelta",out var relationship)?relationship.GetInt32():0,x.TryGetProperty("trustDelta",out var trust)?trust.GetInt32():0,x.TryGetProperty("respectDelta",out var respect)?respect.GetInt32():0,x.TryGetProperty("newMemories",out var memories)&&memories.ValueKind==JsonValueKind.Array?memories.EnumerateArray().Select(v=>v.GetString()??"").Where(v=>v.Length>0).ToList():[],inputTokens,outputTokens,raw);
+            }
+            catch(Exception e) when(e is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException or ArgumentOutOfRangeException)
+            {
+                // Many OpenAI-compatible/free endpoints ignore the JSON
+                // instruction and return a perfectly usable sentence. Keep
+                // that sentence instead of needlessly falling back, but never
+                // expose an echoed prompt or a JSON/code-fence fragment.
+                var plain=text.Trim();
+                if(TryExtractDialogue(plain,out var extractedDialogue))return new(extractedDialogue,"neutral",0,0,0,[],inputTokens,outputTokens,raw);
+                if(!LooksLikeJsonOrPrompt(plain))return new(plain,"neutral",0,0,0,[],inputTokens,outputTokens,raw);
+                throw new LlmUnavailableException("Compatible API returned malformed dialogue JSON.",e);
+            }
         }
         catch(LlmUnavailableException){throw;}
         catch(Exception e) when(e is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException or ArgumentOutOfRangeException){throw new LlmUnavailableException("Compatible API returned an unreadable response envelope.",e);}
     }
-    private static string ReadContent(JsonElement choice){if(choice.TryGetProperty("message",out var message)){if(message.TryGetProperty("content",out var content)){if(content.ValueKind==JsonValueKind.String)return content.GetString()??"";if(content.ValueKind==JsonValueKind.Array)return string.Join("",content.EnumerateArray().Where(x=>x.TryGetProperty("text",out _)).Select(x=>x.GetProperty("text").GetString()??""));}if(message.TryGetProperty("reasoning",out var reasoning)&&reasoning.ValueKind==JsonValueKind.String)return reasoning.GetString()??"";}return choice.TryGetProperty("text",out var text)&&text.ValueKind==JsonValueKind.String?text.GetString()??"":"";}
+    private static string ReadContent(JsonElement choice){if(choice.TryGetProperty("message",out var message)&&message.TryGetProperty("content",out var content)){if(content.ValueKind==JsonValueKind.String)return content.GetString()??"";if(content.ValueKind==JsonValueKind.Array)return string.Join("",content.EnumerateArray().Where(x=>x.TryGetProperty("text",out _)&&(!x.TryGetProperty("type",out var type)||type.ValueKind!=JsonValueKind.String||type.GetString() is "text" or "output_text")).Select(x=>x.GetProperty("text").GetString()??""));}return choice.TryGetProperty("text",out var text)&&text.ValueKind==JsonValueKind.String?text.GetString()??"":"";}
     private static string ReadError(JsonElement error){if(error.ValueKind==JsonValueKind.String)return error.GetString()??"unknown error";return error.TryGetProperty("message",out var message)?message.GetString()??"unknown error":error.ToString();}
+    private static bool LooksLikeJsonOrPrompt(string text)
+    {
+        if(text.Contains('{')||text.Contains('}')||text.Contains('[')||text.Contains(']')||text.Contains("```")||text.Contains("\"dialogue\"",StringComparison.OrdinalIgnoreCase))return true;
+        return new[]{"system:","user:","return only valid json","we need to respond as ","we need to output ","you write believable football dialogue","respond as this character","relationship: score ","relevant save events:","relevant memories:","recent messages:","private player state:","verified/provider facts json:","current career date/season:","initiate one natural private message to ","current journalist question:","verified match facts:","<think>","</think>","system prompt","newmemories"}.Any(marker=>text.Contains(marker,StringComparison.OrdinalIgnoreCase));
+    }
+    private static bool TryExtractDialogue(string text,out string dialogue)
+    {
+        dialogue="";var marker=text.IndexOf("\"dialogue\"",StringComparison.OrdinalIgnoreCase);if(marker<0)return false;var colon=text.IndexOf(':',marker+"\"dialogue\"".Length);if(colon<0)return false;var start=colon+1;while(start<text.Length&&char.IsWhiteSpace(text[start]))start++;if(start>=text.Length||text[start]!='"')return false;
+        for(var i=start+1;i<text.Length;i++)
+        {
+            if(text[i]!='"'||text[i-1]=='\\')continue;
+            try{var value=JsonSerializer.Deserialize<string>(text[start..(i+1)]);if(!string.IsNullOrWhiteSpace(value)){dialogue=value.Trim();return true;}}catch(JsonException){return false;}
+        }
+        return false;
+    }
     private static string NormalizeEndpoint(string endpoint){var value=endpoint.Trim().TrimEnd('/');if(value.EndsWith("/chat/completions",StringComparison.OrdinalIgnoreCase))return value;if(value.EndsWith("/v1",StringComparison.OrdinalIgnoreCase))return value+"/chat/completions";return value+"/v1/chat/completions";}
     private static string ExtractJson(string text){var value=text.Trim();if(value.StartsWith("```")&&value.EndsWith("```")){var first=value.IndexOf('\n');value=first>=0?value[(first+1)..^3].Trim():value.Trim('`');}var start=value.IndexOf('{');var end=value.LastIndexOf('}');return start>=0&&end>start?value[start..(end+1)]:value;}
 }

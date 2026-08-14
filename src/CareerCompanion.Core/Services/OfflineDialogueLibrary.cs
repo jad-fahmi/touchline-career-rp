@@ -8,6 +8,28 @@ namespace CareerCompanion.Core.Services;
 /// </summary>
 public static class OfflineDialogueLibrary
 {
+    /// <summary>
+    /// Returns true when a player message needs an open-ended model response.
+    /// Offline dialogue deliberately handles statements, greetings, short pings,
+    /// and football topics for which the library has grounded intent-specific text.
+    /// The model is reserved for genuinely open questions, such as opinions about
+    /// another player, that cannot be answered from the local career context.
+    /// </summary>
+    public static bool RequiresAi(string message)
+    {
+        var text=message.Trim();
+        if(text.Length==0)return false;
+        var lower=text.ToLowerInvariant();
+        var intent=Intent(lower);
+        var asksQuestion=lower.Contains('?')||new[]{"what ","why ","how ","who ","when ","where ","which ","should ","could ","would ","can ","do ","does ","is ","are ","will "}.Any(lower.StartsWith);
+        if(!asksQuestion&&intent is not "general")return false;
+        // A question is not the only kind of message that can need context.
+        // Longer, unrecognised statements (opinions, tactical observations,
+        // criticism, jokes, and references to another player) also go to the
+        // model. Only grounded intents and short social pings stay offline.
+        return intent is "question" || intent is "general" && text.Length>12;
+    }
+
     public static GenerationResult Direct(Character character,Career career,Relationship relationship,CharacterState state,PlayerState player,string message,SceneType scene)
     {
         var text=message.Trim();var lower=text.ToLowerInvariant();var p=character.Profile.Personality;var c=character.Profile.Communication;var seed=Seed(character.Id.ToString(),career.CurrentDate,text,scene.ToString());
@@ -64,8 +86,8 @@ public static class OfflineDialogueLibrary
     {
         var input=match.Input;var p=character.Profile.Personality;var c=character.Profile.Communication;var playful=p.Humor>=58||c.Humor>=58;var direct=p.Diplomacy<45||c.Directness>=74;var seed=Seed(character.Id.ToString(),career.CurrentDate,evt.Id.ToString(),evt.Type);
         if(!input.ScoreKnown)return character.Type==CharacterType.Manager
-            ?Pick(new[]{"I have the appearance and rating logged, but FIFA did not expose the final score. We will fill in the result when the save gives us the detail.","Your minutes and performance are recorded. The save is missing the scoreline, so I will not pretend to know the result."},seed)
-            :Pick(new[]{"Your appearance and rating are in. FIFA has not given us the scoreline yet, so I am not going to make one up.","I saw the minutes and rating. The result is missing from the save, but your performance is logged."},seed);
+            ?Pick(new[]{"I could not see the final scoreline, but I have your minutes and performance. Tell me how you felt the match went and we will review the detail when it is available.","The result is not clear yet. I want your honest read on the performance before we fill in the rest of the report."},seed)
+            :Pick(new[]{"I saw your minutes and performance, but the scoreline has not come through yet. How did it feel from the pitch?","The match detail is incomplete, but your appearance is logged. Tell me what you thought of your game."},seed);
         if(character.Type==CharacterType.Manager)
         {
             if(input.TeamContext=="International")return input.TeamScore>input.OpponentScore?Pick(new[]{$"Good work with {input.RepresentingTeam}. Recover properly, then return ready for club duty.","That is a useful result for {input.RepresentingTeam}. Enjoy it, then turn your attention back to the club.","You represented {input.RepresentingTeam} well. Manage your recovery because the club schedule will not wait."},seed):Pick(new[]{$"International defeats hurt. Reset tonight and bring your focus back to the club.","A difficult night for {input.RepresentingTeam}. Learn from it, recover, and return ready.","That result will sting, but international duty is part of your growth. We will discuss it when you are back."},seed);
@@ -127,6 +149,28 @@ public static class OfflineDialogueLibrary
         if(person.Type==CharacterType.Agent)return Pick(high?new[]{$"I heard how badly the result against {opponent} hit you. Do not sit with this alone tonight.",$"I heard how badly the result against {opponent} hit you. Do not sit with this alone. Call me when you are somewhere quiet.",$"Do not sit with this alone. I am checking in because this is exactly when you need people around you. No performance, just talk to me."}:new[]{$"Forget the noise around the result for a moment. Call me when you are somewhere quiet.",$"Keep tonight simple: eat, rest, and let me know how your head feels tomorrow.",$"You have a career to manage, but you are also allowed to have a difficult evening. I am here."},seed);
         if(person.Type==CharacterType.Manager)return Pick(high?new[]{$"Football can wait tonight. Speak to someone you trust and check in with me tomorrow.",$"I know the result has landed heavily. Take the evening away from the noise, then we will make a plan.",$"You are still part of this group. Rest first, then we will decide what support you need."}:new[]{$"I know this result hurts. Take tonight, clear your head, and we will talk properly tomorrow.",$"Do not let one performance become a judgement on your whole season. We will review it calmly.",$"You can be disappointed and still be ready to respond. We will help you get there."},seed);
         return Pick(high?new[]{$"I know this one has hit you hard. You do not need to find the right words.",$"Come sit with us for a while. You do not have to talk about the match.",$"I am not going to tell you to cheer up. I am just here, and I am not going anywhere."}:new[]{$"That result is still hurting, I know. If you want company, call me.",$"Bad days happen. Stay near the lads tonight and do not disappear.",$"You do not have to pretend it was fine. We can talk when you are ready."},seed);
+    }
+
+    public static string TransferRequest(Character character,string status,int seed)
+    {
+        if(character.Type==CharacterType.Manager)return status switch
+        {
+            "Accepted"=>Pick(new[]{"The request has been accepted. We will handle the next steps professionally, but I would still like to understand what brought you here.","The club has agreed to let you leave. Before you go, tell me honestly what was missing for you here."},seed),
+            "Rejected"=>Pick(new[]{"The request was rejected. Come and speak to me properly. Why did you feel leaving was the answer?","I have not approved the request. I need to hear from you directly, not through headlines or an agent."},seed),
+            _=>Pick(new[]{"I have seen the transfer request. Before we decide anything, tell me why you want to leave.","You handed in a request. I am disappointed, but I would rather hear the reason from you. Is this about minutes, the squad, or something else?","This changes the conversation around your place here. Come to my office and explain what has brought you to this point."},seed)
+        };
+        if(character.Type==CharacterType.Agent)return status switch
+        {
+            "Accepted"=>Pick(new[]{"The club has accepted the request. We will keep the next steps clean and make sure you understand every option.","It is moving now. I still want your honest reason for leaving so we choose the right next club, not just the quickest one."},seed),
+            "Rejected"=>Pick(new[]{"They rejected the request. We need to decide whether you want to repair the relationship or keep pushing for a move.","The answer is no for now. Tell me what changed for you, and I will work out the next move from there."},seed),
+            _=>Pick(new[]{"I saw the request go in. Good. Now tell me the real reason you want out so I can protect your next step.","The paperwork is only the beginning. Is this about minutes, the manager, the club direction, or something personal?","I will handle the noise around the request, but I need clarity from you. Why leave now?"},seed)
+        };
+        return status switch
+        {
+            "Accepted"=>Pick(new[]{"So it has been accepted. I am happy for you, but I want to know why you felt you had to leave us.","The room is talking about it. Are you okay with how quickly this is happening?"},seed),
+            "Rejected"=>Pick(new[]{"I heard they rejected it. What made you want out in the first place?","That must feel awkward. Do you think you can still be happy here after asking to leave?"},seed),
+            _=>Pick(new[]{"I saw you handed in a transfer request. Why? Is it something in the squad, or are you just ready for a change?","The lads are wondering what happened. You do not have to explain everything, but are you really trying to leave?","That is a big step. If you want to talk about it without the football language, I am here."},seed)
+        };
     }
 
     public static string Transfer(Character agent,string from,string to,int seed)=>Pick(new[]{$"The move from {from} to {to} is complete. Settle quickly, learn the environment, and make the first opportunity count.",$"A new club means a new test. Be patient with the adjustment from {from} to {to}, but do not hide from the competition.",$"The transfer is done. Your first target at {to} is simple: earn trust every day and let the football follow.",$"Forget the announcement now. The real work starts at {to}, and I will help you manage the noise around it."},seed);

@@ -94,12 +94,13 @@ public sealed record ConversationMessage(string Role, string Content, DateTime T
             var value=Content.Trim();
             if(value.StartsWith("{")&&value.EndsWith("}"))
             {
-                try{using var json=JsonDocument.Parse(value);if(json.RootElement.TryGetProperty("dialogue",out var dialogue)&&dialogue.ValueKind==JsonValueKind.String)return dialogue.GetString()??value;}catch(JsonException){}
+                try{using var json=JsonDocument.Parse(value);if(json.RootElement.TryGetProperty("dialogue",out var dialogue)&&dialogue.ValueKind==JsonValueKind.String)value=dialogue.GetString()??value;}catch(JsonException){}
             }
-            if(value.Contains("We need to respond as ",StringComparison.OrdinalIgnoreCase)||value.Contains("We need to output ",StringComparison.OrdinalIgnoreCase)||value.Contains("Return only valid JSON",StringComparison.OrdinalIgnoreCase)||value.Contains("Current journalist question:",StringComparison.OrdinalIgnoreCase)||value.Contains("Verified match facts:",StringComparison.OrdinalIgnoreCase))return "The previous reply could not be generated correctly. Send another message to try again.";
-            return Content;
+            if(IsPromptEcho(value))return "The previous reply could not be generated correctly. Send another message to try again.";
+            return value;
         }
     }
+    private static bool IsPromptEcho(string value)=>value.StartsWith("system:",StringComparison.OrdinalIgnoreCase)||value.StartsWith("user:",StringComparison.OrdinalIgnoreCase)||new[]{"We need to respond as ","We need to output ","Return only valid JSON","You write believable football dialogue","Respond as this character","Relationship: score ","Relevant save events:","Relevant memories:","Recent messages:","Private player state:","Verified/provider facts JSON:","Current career date/season:","Initiate one natural private message to ","Current journalist question:","Verified match facts:","<think>","</think>","system prompt","newMemories"}.Any(marker=>value.Contains(marker,StringComparison.OrdinalIgnoreCase));
     private static string FormatScene(string scene)=>scene switch{"PrivateMessage"=>"Private message","DressingRoom"=>"Dressing room","TrainingGround"=>"Training ground","PostMatch"=>"Post-match","PreMatch"=>"Pre-match","PressConference"=>"Press conference","ManagerOffice"=>"Manager office","TransferDiscussion"=>"Transfer discussion","Casual"=>"Casual",_=>scene.Replace('_',' ')};
 }
 public sealed record NewsItem(long Id, long CareerId, long? EventId, string Outlet, string Headline,

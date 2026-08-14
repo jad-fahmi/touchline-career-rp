@@ -31,6 +31,13 @@ public sealed class Fifa18IntegrationTests : IDisposable
 
     [Fact] public void Ignores_unrelated_news()=>Assert.Null(Fifa18CareerNormalizer.ParseMatchReport("Transfer update","No match here.","Arsenal"));
 
+    [Fact] public void Resolves_supercopa_opponent_even_when_score_is_missing()
+    {
+        var context=Fifa18CareerNormalizer.ParseMatchContext("Supercopa Review: Real Madrid vs Barcelona","The match review did not include the final score.","Real Madrid");
+        Assert.NotNull(context);Assert.Equal("Supercopa",context.Competition);Assert.Equal("Barcelona",context.Opponent);Assert.True(context.IsHome);
+        Assert.Null(Fifa18CareerNormalizer.ParseMatchReport("Supercopa Review: Real Madrid vs Barcelona","The match review did not include the final score.","Real Madrid"));
+    }
+
     [Fact]
     public void Parses_next_fixture_from_Fifa_preview()
     {

@@ -50,6 +50,7 @@ public sealed class Fifa18ImportService(Database db)
             foreach(var old in providerAgents.Where(x=>x.Id!=existing?.Id))db.UpdateProviderStaff(old.Id,ProviderName,old.Club,"Former representative",false);
             if(existing is null){var id=db.AddCharacter(careerId,parsed.AgentName,0,"","","Agent","Representative",CharacterType.Agent,StablePersonality(parsed.AgentName),new("brief",70,5,10,35,65,20,10));db.UpdateProviderStaff(id,ProviderName,"","Representative",true);}else db.UpdateProviderStaff(existing.Id,ProviderName,"","Representative",true);
         }
+        if(parsed.TransferRequest is { } request)worldUpdates+=new Services.AutomaticWorldService(db).ApplyTransferRequest(careerId,request,autoTeammates,autoManager);
         if(storedFixture is not null)worldUpdates+=new Services.AutomaticWorldService(db).ApplyPreMatch(careerId,storedFixture,parsed.OpponentScout,autoTeammates,autoManager);
         var worldNews=parsed.WorldNews??Array.Empty<Fifa18WorldNews>();
         for(var index=0;index<worldNews.Count;index++)

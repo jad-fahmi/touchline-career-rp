@@ -47,7 +47,7 @@ The app owns facts, state, chronology, relationships, memory, bounds, and event 
 - Scene-aware messages, manager and agent conversations, conditional multi-question post-match interviews with grounded AI follow-ups and offline fallback, and consequential public statements
 - Statement-aware manager and teammate follow-ups for accountable, team-first, boastful, critical, or referee-focused interview answers
 - Automatic pre-match manager briefings and teammate messages, with opposition key players, manager, venue, and rivalry context read from the FIFA save when available
-- Transfer coverage, agent guidance, and deduplicated squad arrival or departure storylines
+- Transfer-request detection with manager, teammate, and agent conversations, plus transfer coverage, agent guidance, and deduplicated squad arrival or departure storylines
 - Differentiated offline news outlets and social personas
 - Dated football record catalogue covering 2017/18-era UEFA Champions League, Premier League, LaLiga, Portugal international, scoring-streak, and rare five-goal milestones; verified breakthroughs create a timeline event, red notification, and agent reaction
 - Career dashboard, chronological timeline, settings, debug inspector, and DPAPI-protected API keys

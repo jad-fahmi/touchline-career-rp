@@ -48,6 +48,39 @@ public sealed class AutomaticWorldService(Database db)
         _=>"player selection not confirmed by FIFA; playing time must not be assumed"
     };
 
+    public int ApplyTransferRequest(long careerId,Fifa18TransferRequestSignal signal,bool teammates=true,bool managers=true)
+    {
+        var career=db.GetCareer(careerId);var timestamp=DateTime.TryParse(signal.Date,out var date)?date:DateTime.UtcNow;
+        var status=signal.Status is "Accepted" or "Rejected"?signal.Status:"Requested";
+        var type=status switch{"Accepted"=>"PLAYER_TRANSFER_REQUEST_ACCEPTED","Rejected"=>"PLAYER_TRANSFER_REQUEST_REJECTED",_=>"PLAYER_TRANSFER_REQUESTED"};
+        var summary=status switch
+        {
+            "Accepted"=>$"The club accepted {career.PlayerName}'s transfer request.",
+            "Rejected"=>$"The club rejected {career.PlayerName}'s transfer request.",
+            _=>$"{career.PlayerName} handed in a transfer request at {career.Club}."
+        };
+        var importance=status=="Requested"?86:82;var metadata=JsonSerializer.Serialize(new{signal.EventKey,signal.Status,signal.Evidence});var evtId=db.SaveEvent(new(0,careerId,null,type,timestamp,importance,"[]",metadata,summary,FactClassification.SaveFact));var notices=0;
+        if(db.AddNotification(careerId,"Transfer",status=="Requested"?"Transfer request submitted":$"Transfer request {status.ToLowerInvariant()}",summary,"Timeline",importance,$"transfer-request:{signal.EventKey}:{status}",timestamp))notices++;
+        var active=db.GetCharacters(careerId).Where(IsActive).ToList();var manager=active.FirstOrDefault(x=>x.Type==CharacterType.Manager);var mates=active.Where(x=>x.Type==CharacterType.Teammate).OrderByDescending(Overall).ThenBy(x=>x.Id).Take(3).ToList();var agent=active.FirstOrDefault(x=>x.Type==CharacterType.Agent);
+        if(managers&&manager is not null)
+        {
+            var text=OfflineDialogueLibrary.TransferRequest(manager,status,evtId.GetHashCode());
+            if(db.AddAutomaticReaction(careerId,manager.Id,evtId,SceneType.TransferDiscussion,JsonSerializer.Serialize(new{automatic=true,eventId=evtId,transferRequest=status}),text,importance, status=="Rejected"?-10:0,"manager transfer-request conversation","Manager",manager.Name,$"Messages:{manager.Id}",importance,$"transfer-request-manager:{signal.EventKey}:{status}",timestamp))notices++;
+        }
+        if(teammates)
+            foreach(var teammate in mates)
+            {
+                var text=OfflineDialogueLibrary.TransferRequest(teammate,status,unchecked(evtId.GetHashCode()+teammate.Id.GetHashCode()));
+                if(db.AddAutomaticReaction(careerId,teammate.Id,evtId,SceneType.PrivateMessage,JsonSerializer.Serialize(new{automatic=true,eventId=evtId,transferRequest=status}),text,Math.Max(55,importance-12),status=="Rejected"?-5:5,"teammate transfer-request conversation","Message",teammate.Name,$"Messages:{teammate.Id}",Math.Max(55,importance-10),$"transfer-request-teammate:{signal.EventKey}:{status}:{teammate.Id}",timestamp))notices++;
+            }
+        if(agent is not null)
+        {
+            var text=OfflineDialogueLibrary.TransferRequest(agent,status,unchecked(evtId.GetHashCode()+agent.Id.GetHashCode()));
+            if(db.AddAutomaticReaction(careerId,agent.Id,evtId,SceneType.TransferDiscussion,JsonSerializer.Serialize(new{automatic=true,eventId=evtId,transferRequest=status}),text,Math.Max(65,importance-5),10,"agent transfer-request guidance","Message",agent.Name,$"Messages:{agent.Id}",Math.Max(70,importance-3),$"transfer-request-agent:{signal.EventKey}:{status}",timestamp))notices++;
+        }
+        return notices;
+    }
+
     public int ApplySquadChanges(long careerId,string sourceFingerprint,IReadOnlyList<Character> arrivals,IReadOnlyList<Character> departures,string careerDate,bool teammates=true)
     {
         if(arrivals.Count==0&&departures.Count==0)return 0;var timestamp=DateTime.TryParse(careerDate,out var date)?date:DateTime.UtcNow;var notices=0;
@@ -64,7 +97,21 @@ public sealed class AutomaticWorldService(Database db)
     public AutomaticWorldResult ApplyMatch(MatchProcessingResult result,bool teammates,bool managers,bool interviewCreated,bool newsCreated,bool socialCreated)
     {
         var career=db.GetCareer(result.Match.CareerId);var characters=db.GetCharacters(career.Id).ToDictionary(x=>x.Id);var messages=0;var notices=0;
-        foreach(var target in result.Reactions.Where(x=>x.CharacterId is not null).DistinctBy(x=>x.CharacterId).OrderByDescending(x=>x.Priority))
+        // Keep a match readable. A manager and one relevant teammate are
+        // enough for a normal result. Defeats are handled by the wellbeing
+        // service below, so do not stack a generic post-match chorus on top.
+        var eligible=result.Reactions.Where(x=>x.CharacterId is not null).DistinctBy(x=>x.CharacterId).OrderByDescending(x=>x.Priority).Where(target=>
+        {
+            var character=characters.GetValueOrDefault(target.CharacterId!.Value);return character is not null&&IsActive(character)&&
+                (character.Type==CharacterType.Manager&&managers||character.Type==CharacterType.Teammate&&teammates);
+        }).ToList();
+        var selectedTargets=new List<ReactionTarget>();
+        if(result.Match.Result!="L"&&result.Match.Input.ScoreKnown)
+        {
+            var managerTarget=eligible.FirstOrDefault(x=>characters[x.CharacterId!.Value].Type==CharacterType.Manager);if(managerTarget is not null)selectedTargets.Add(managerTarget);
+            var teammateTarget=eligible.FirstOrDefault(x=>characters[x.CharacterId!.Value].Type==CharacterType.Teammate);if(teammateTarget is not null)selectedTargets.Add(teammateTarget);
+        }
+        foreach(var target in selectedTargets)
         {
             if(!characters.TryGetValue(target.CharacterId!.Value,out var character)||!IsActive(character))continue;
             if(character.Type==CharacterType.Manager&&!managers||character.Type==CharacterType.Teammate&&!teammates)continue;
