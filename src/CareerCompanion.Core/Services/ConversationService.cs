@@ -25,8 +25,11 @@ public sealed class ConversationService(Database db,ILlmProvider llm)
         }
         else
         {
-            var outcome=await new DialogueGenerator(llm).GenerateAsync(
-                new PromptBuilder().Character(character,career,rel,scene,memories,events,history,message,model,characterState,playerState,situation),character.Name,[message],ct);
+            // Characters answer in English unless the player has asked for their own language, so the prompt
+            // says so and a reply that arrives in another language is corrected rather than shown.
+            var nativeLanguages=DialogueLanguage.NativeLanguagesEnabled(db);
+            var outcome=await new DialogueGenerator(llm,englishOnly:!nativeLanguages).GenerateAsync(
+                new PromptBuilder().Character(character,career,rel,scene,memories,events,history,message,model,characterState,playerState,situation,nativeLanguages),character.Name,[message],ct);
             tokens=(outcome.InputTokens,outcome.OutputTokens);
             if(outcome.Succeeded)
             {

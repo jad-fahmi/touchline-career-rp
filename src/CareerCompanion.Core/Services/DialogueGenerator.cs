@@ -15,7 +15,11 @@ public sealed record DialogueOutcome(GenerationResult? Result,int Attempts,int I
 /// model: the request is sent again with a correction aimed at exactly what went wrong. Offline dialogue is
 /// only reached when the model is unreachable or every attempt failed the same way.
 /// </summary>
-public sealed class DialogueGenerator(ILlmProvider provider,int maxAttempts=3)
+/// <param name="englishOnly">
+/// Set when characters are not allowed to answer in their own first language, which is the default. A reply
+/// written in the character's language is corrected like any other formatting failure.
+/// </param>
+public sealed class DialogueGenerator(ILlmProvider provider,int maxAttempts=3,bool englishOnly=true)
 {
     public string ProviderName=>provider.Name;
 
@@ -33,7 +37,7 @@ public sealed class DialogueGenerator(ILlmProvider provider,int maxAttempts=3)
             {
                 var result=await provider.GenerateAsync(Correct(request,attempt,correction),ct);
                 input+=result.InputTokens;output+=result.OutputTokens;
-                if(DialogueResponseGuard.TryPrepare(result.Text,speakerName,spokenAlready,out var dialogue,out var rejection))
+                if(DialogueResponseGuard.TryPrepare(result.Text,speakerName,spokenAlready,englishOnly,out var dialogue,out var rejection))
                     return new(result with{Text=dialogue},attempt,input,output,null);
                 correction=rejection;
                 failure=Describe(rejection);
@@ -59,6 +63,7 @@ public sealed class DialogueGenerator(ILlmProvider provider,int maxAttempts=3)
             DialogueResponseGuard.Rejection.FourthWall=>"CORRECTION: your last answer referred to FIFA, a save, data, or software. Those do not exist in this world. Team selection is the manager's decision, fitness is the medical staff's, and transfers are the club's. If something is not settled yet, say so in ordinary football words.",
             DialogueResponseGuard.Rejection.PromptEcho=>"CORRECTION: your last answer leaked instructions, reasoning, or an unfinished wrapper. Write only what the character says out loud, in one JSON object, with no thinking, no labels, and no text outside the JSON.",
             DialogueResponseGuard.Rejection.Parroted=>"CORRECTION: your last answer handed back the question you were given and the words you were answered with. Do not repeat either. Write a new line in your own words that reacts to what was said, and ask something you have not asked yet.",
+            DialogueResponseGuard.Rejection.ForeignLanguage=>"CORRECTION: your last answer was written in another language. This conversation happens in English. Write the whole reply in English, including greetings, slang, and endearments, and let the character's background show in how they speak rather than in foreign words.",
             _=>"CORRECTION: your last answer could not be read. Return one JSON object with a complete dialogue string and nothing before or after it."
         };
         var force=attempt>=3?" Keep the dialogue under sixty words and finish every sentence." : "";
@@ -74,6 +79,7 @@ public sealed class DialogueGenerator(ILlmProvider provider,int maxAttempts=3)
         DialogueResponseGuard.Rejection.FourthWall=>"the model kept referring to the game instead of the football world",
         DialogueResponseGuard.Rejection.PromptEcho=>"the model kept leaking prompt or reasoning text",
         DialogueResponseGuard.Rejection.Parroted=>"the model kept repeating the question and the player's own answer instead of replying",
+        DialogueResponseGuard.Rejection.ForeignLanguage=>"the model kept answering in another language",
         _=>"the model returned nothing usable"
     };
 

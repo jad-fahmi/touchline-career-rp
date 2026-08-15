@@ -71,7 +71,7 @@ public static partial class DialogueResponseGuard
     ];
 
     /// <summary>Why a reply could not be used, so the caller can ask the model for a corrected one.</summary>
-    public enum Rejection { None, Empty, PromptEcho, FourthWall, Parroted }
+    public enum Rejection { None, Empty, PromptEcho, FourthWall, Parroted, ForeignLanguage }
 
     public static bool IsUsable(string? text)=>TryPrepare(text,null,out _,out _);
 
@@ -88,12 +88,22 @@ public static partial class DialogueResponseGuard
     /// failure the other checks cannot see, because copied text is neither prompt nor a fourth-wall break.
     /// </summary>
     public static bool TryPrepare(string? text,string? speakerName,IReadOnlyList<string>? spokenAlready,out string dialogue,out Rejection rejection)
+        =>TryPrepare(text,speakerName,spokenAlready,false,out dialogue,out rejection);
+
+    /// <summary>
+    /// As above, with <paramref name="englishOnly"/> set when the player has not asked characters to speak
+    /// their own first language. A nationality in the prompt is enough to make some models answer in that
+    /// language, which leaves the player with a message they cannot read, so the reply is sent back for a
+    /// correction rather than shown.
+    /// </summary>
+    public static bool TryPrepare(string? text,string? speakerName,IReadOnlyList<string>? spokenAlready,bool englishOnly,out string dialogue,out Rejection rejection)
     {
         dialogue="";
         rejection=Rejection.Empty;
         var value=Repair(text,speakerName);
         if(value.Length==0)return false;
         if(DialoguePayload.LooksLikePrompt(value)||IsModelMetadata(value)){rejection=Rejection.PromptEcho;return false;}
+        if(englishOnly&&DialogueLanguage.ReadsAsAnotherLanguage(value)){rejection=Rejection.ForeignLanguage;return false;}
         if(BreaksFourthWall(value)){rejection=Rejection.FourthWall;return false;}
         if(Parrots(value,spokenAlready)){rejection=Rejection.Parroted;return false;}
         dialogue=value;

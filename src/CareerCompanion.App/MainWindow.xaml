@@ -1728,6 +1728,9 @@
                 <CheckBox Content="Automatic news" IsChecked="{Binding AutoNews}" Style="{StaticResource ToggleSwitch}"/>
                 <CheckBox Content="Automatic social posts" IsChecked="{Binding AutoSocial}" Style="{StaticResource ToggleSwitch}"/>
                 <CheckBox Content="Automatic press prompts" IsChecked="{Binding AutoPress}" Style="{StaticResource ToggleSwitch}"/>
+                <CheckBox Content="Let characters speak their own language" IsChecked="{Binding NativeLanguages}" Style="{StaticResource ToggleSwitch}"/>
+                <TextBlock Text="Off by default, so everyone writes to you in English. Turn it on and a foreign teammate can greet you, swear, or answer in their first language."
+                           Style="{StaticResource Caption}" Margin="2,-6,0,10"/>
                 <CheckBox Content="Developer and debug mode" IsChecked="{Binding DebugMode}" Style="{StaticResource ToggleSwitch}"/>
                 <Button Content="SAVE PREFERENCES" Click="SaveSettings_Click" HorizontalAlignment="Left" Margin="0,6,0,0"/>
               </StackPanel>

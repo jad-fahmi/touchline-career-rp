@@ -102,6 +102,50 @@ public sealed class DialogueGuardTests : IDisposable
         "I missed a lot of shots before those two goals, my teammates were getting frustrated, so I had to score."
     ];
 
+    [Theory]
+    // A nationality in the prompt is enough to make a model answer in that language, which leaves the player
+    // holding a message they cannot read.
+    [InlineData("Vamos hermano, has estado increíble hoy. Te lo mereces.")]
+    [InlineData("C'est mérité, mon frère. Tu as très bien joué aujourd'hui.")]
+    [InlineData("Stark gespielt heute, Bruder. Ich habe dich gesehen, das war richtig gut.")]
+    [InlineData("Che partita, fratello. Sei stato davvero forte oggi.")]
+    [InlineData("Parabéns irmão, você jogou muito bem hoje.")]
+    [InlineData("Отличная игра сегодня, брат. Ты заслужил это.")]
+    public void A_reply_written_in_the_characters_own_language_is_refused_by_default(string raw)
+    {
+        Assert.False(DialogueResponseGuard.TryPrepare(raw,"Mate",null,true,out _,out var rejection));
+        Assert.Equal(DialogueResponseGuard.Rejection.ForeignLanguage,rejection);
+    }
+
+    [Theory]
+    [InlineData("Massive win today mate, you were unreal. See you at training tomorrow.")]
+    [InlineData("Do not worry about the miss, the boss knows what you give us.")]
+    // A foreign name is not a foreign reply, and neither is one borrowed word in an English line.
+    [InlineData("Álvaro was buzzing for you after that finish, and so was I.")]
+    [InlineData("Vamos! Big performance today, you carried us in that second half.")]
+    public void English_dialogue_is_not_mistaken_for_another_language(string raw)
+    {
+        Assert.True(DialogueResponseGuard.TryPrepare(raw,"Mate",null,true,out var dialogue,out _));
+        Assert.Equal(raw,dialogue);
+    }
+
+    [Fact]
+    public void The_native_language_option_lets_the_same_reply_through()
+    {
+        const string raw="Vamos hermano, has estado increíble hoy. Te lo mereces.";
+        Assert.True(DialogueResponseGuard.TryPrepare(raw,"Mate",null,false,out var dialogue,out _));
+        Assert.Equal(raw,dialogue);
+    }
+
+    [Fact]
+    public void Characters_speak_English_until_the_player_says_otherwise()
+    {
+        var db=NewDb();
+        Assert.False(DialogueLanguage.NativeLanguagesEnabled(db));
+        db.SetSetting(DialogueLanguage.SettingKey,true.ToString());
+        Assert.True(DialogueLanguage.NativeLanguagesEnabled(db));
+    }
+
     [Fact]
     public void Leaked_prompt_or_reasoning_text_is_still_refused()
     {

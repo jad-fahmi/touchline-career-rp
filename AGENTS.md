@@ -42,6 +42,7 @@ Keep provider parsing separate from simulation and UI. New FIFA fields should be
 - A model response is a response to the player's message. Never use the model to invent the first incoming message.
 - OpenAI-compatible providers must not expose system prompts, reasoning text, JSON fragments, or prompt echoes. Normal plain-text dialogue can be accepted when a provider ignores the requested JSON wrapper; salvage a valid `dialogue` field from a broken wrapper where safe.
 - Keep relationship and memory deltas bounded and grounded. AI language must not change factual match data.
+- Characters write to the player in English by default. A nationality in the prompt is enough to make a model answer in that language, so every system prompt states the language and a reply that comes back in another one is regenerated with a correction. "Let characters speak their own language" in Settings turns the realistic behaviour on, and only then is a foreign reply accepted.
 - Offline dialogue should vary by character type, personality, communication style, age gap, relationship, scene, and event. Avoid sending every teammate the same post-match message.
 - Two characters must never send the same line. Multi-speaker events share one set of used lines, each speaker seeds from its own identity, and phrases used recently by anyone else in the career are off limits.
 - Keep post-match reaction volume intentional. Prefer a small number of distinct voices over a broadcast to the whole squad. Wellbeing support should not be duplicated by generic match reactions.
