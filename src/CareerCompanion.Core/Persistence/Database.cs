@@ -9,12 +9,28 @@ public sealed class Database(string path)
 {
     public string Path { get; } = path;
     private string ConnectionString => new SqliteConnectionStringBuilder { DataSource = Path, ForeignKeys = true }.ToString();
-    public SqliteConnection Open() { var c = new SqliteConnection(ConnectionString); c.Open(); return c; }
+
+    /// <summary>
+    /// Opens a connection that waits for a writer instead of failing. A FIFA scan can run while the player
+    /// is reading messages, and a lock timeout used to surface as a hard error in the middle of an import.
+    /// </summary>
+    public SqliteConnection Open()
+    {
+        var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA busy_timeout=8000; PRAGMA synchronous=NORMAL;";
+        pragma.ExecuteNonQuery();
+        return connection;
+    }
 
     public void Migrate()
     {
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
         using var db = Open();
+        // Write-ahead logging lets the interface keep reading while a scan writes. It is a property of the
+        // file, so it only has to be set once, and Backup/Restore below account for the side-car files.
+        using (var journal = db.CreateCommand()) { journal.CommandText = "PRAGMA journal_mode=WAL"; journal.ExecuteScalar(); }
         using var cmd = db.CreateCommand();
         cmd.CommandText = """
             CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -45,7 +61,8 @@ public sealed class Database(string path)
               rating REAL NOT NULL, yellow_card INTEGER NOT NULL, red_card INTEGER NOT NULL, penalty_scored INTEGER NOT NULL,
               penalty_missed INTEGER NOT NULL, notes TEXT NOT NULL, next_opponent TEXT, is_derby INTEGER NOT NULL, is_major INTEGER NOT NULL,
               result TEXT NOT NULL, created_at TEXT NOT NULL, started_known INTEGER NOT NULL DEFAULT 1,
-              team_context TEXT NOT NULL DEFAULT 'Club', representing_team TEXT NOT NULL DEFAULT '', score_known INTEGER NOT NULL DEFAULT 1);
+              team_context TEXT NOT NULL DEFAULT 'Club', representing_team TEXT NOT NULL DEFAULT '', score_known INTEGER NOT NULL DEFAULT 1,
+              is_home_known INTEGER NOT NULL DEFAULT 1);
             CREATE TABLE IF NOT EXISTS career_events(id INTEGER PRIMARY KEY, career_id INTEGER NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
               match_id INTEGER REFERENCES matches(id) ON DELETE SET NULL, type TEXT NOT NULL, timestamp TEXT NOT NULL, importance INTEGER NOT NULL,
               entities_json TEXT NOT NULL, metadata_json TEXT NOT NULL, summary TEXT NOT NULL, classification TEXT NOT NULL);
@@ -123,6 +140,18 @@ public sealed class Database(string path)
             INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(4,datetime('now'));
             INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(5,datetime('now'));
             INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(6,datetime('now'));
+            CREATE TABLE IF NOT EXISTS match_performances(id INTEGER PRIMARY KEY, career_id INTEGER NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+              match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE, provider TEXT NOT NULL, external_id TEXT NOT NULL,
+              name TEXT NOT NULL, position TEXT NOT NULL, started INTEGER NOT NULL, minutes INTEGER NOT NULL, rating REAL NOT NULL,
+              UNIQUE(match_id,provider,external_id));
+            CREATE INDEX IF NOT EXISTS idx_match_performances ON match_performances(career_id,match_id);
+            CREATE TABLE IF NOT EXISTS provider_news_cache(id INTEGER PRIMARY KEY, career_id INTEGER NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+              provider TEXT NOT NULL, article_key TEXT NOT NULL, date TEXT NOT NULL, team_id INTEGER NOT NULL, related_team_id INTEGER NOT NULL,
+              title TEXT NOT NULL, body TEXT NOT NULL, first_seen TEXT NOT NULL, UNIQUE(career_id,provider,article_key));
+            CREATE INDEX IF NOT EXISTS idx_provider_news_cache ON provider_news_cache(career_id,provider,date DESC);
+            CREATE TABLE IF NOT EXISTS dialogue_usage(id INTEGER PRIMARY KEY, career_id INTEGER NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+              character_id INTEGER NOT NULL, phrase_key TEXT NOT NULL, used_at TEXT NOT NULL, UNIQUE(career_id,character_id,phrase_key));
+            CREATE INDEX IF NOT EXISTS idx_dialogue_usage ON dialogue_usage(career_id,character_id,used_at DESC);
             INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(7,datetime('now'));
             """;
         cmd.ExecuteNonQuery();
@@ -130,6 +159,7 @@ public sealed class Database(string path)
         EnsureColumn(db,"matches","team_context","TEXT NOT NULL DEFAULT 'Club'");
         EnsureColumn(db,"matches","representing_team","TEXT NOT NULL DEFAULT ''");
         EnsureColumn(db,"matches","score_known","INTEGER NOT NULL DEFAULT 1");
+        EnsureColumn(db,"matches","is_home_known","INTEGER NOT NULL DEFAULT 1");
         EnsureColumn(db,"fixtures","team_context","TEXT NOT NULL DEFAULT 'Club'");
         EnsureColumn(db,"fixtures","representing_team","TEXT NOT NULL DEFAULT ''");
         EnsureColumn(db,"fixtures","availability","TEXT NOT NULL DEFAULT 'Unknown'");
@@ -139,6 +169,7 @@ public sealed class Database(string path)
         using var v10=db.CreateCommand();v10.CommandText="INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(10,datetime('now'))";v10.ExecuteNonQuery();
         using var v11=db.CreateCommand();v11.CommandText="INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(11,datetime('now'))";v11.ExecuteNonQuery();
         using var v12=db.CreateCommand();v12.CommandText="INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(12,datetime('now'))";v12.ExecuteNonQuery();
+        using var v13=db.CreateCommand();v13.CommandText="INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(13,datetime('now'))";v13.ExecuteNonQuery();
     }
     private static void EnsureColumn(SqliteConnection db,string table,string column,string definition){using var info=db.CreateCommand();info.CommandText=$"PRAGMA table_info([{table}])";using var reader=info.ExecuteReader();var found=false;while(reader.Read())if(string.Equals(reader.GetString(1),column,StringComparison.OrdinalIgnoreCase)){found=true;break;}reader.Close();if(found)return;using var alter=db.CreateCommand();alter.CommandText=$"ALTER TABLE [{table}] ADD COLUMN [{column}] {definition}";alter.ExecuteNonQuery();}
 
@@ -279,15 +310,35 @@ public sealed class Database(string path)
         using var save=db.CreateCommand();save.Transaction=tx;save.CommandText="INSERT INTO player_states(career_id,mood,confidence,pressure,fatigue,isolation,resilience,last_trigger,needs_support,updated_at) VALUES($career,$mood,$confidence,$pressure,$fatigue,$isolation,$resilience,$trigger,$support,$updated) ON CONFLICT(career_id) DO UPDATE SET mood=excluded.mood,confidence=excluded.confidence,pressure=excluded.pressure,fatigue=excluded.fatigue,isolation=excluded.isolation,resilience=excluded.resilience,last_trigger=excluded.last_trigger,needs_support=excluded.needs_support,updated_at=excluded.updated_at";save.Parameters.AddWithValue("$career",state.CareerId);save.Parameters.AddWithValue("$mood",state.Mood);save.Parameters.AddWithValue("$confidence",Math.Clamp(state.Confidence,0,100));save.Parameters.AddWithValue("$pressure",Math.Clamp(state.Pressure,0,100));save.Parameters.AddWithValue("$fatigue",Math.Clamp(state.Fatigue,0,100));save.Parameters.AddWithValue("$isolation",Math.Clamp(state.Isolation,0,100));save.Parameters.AddWithValue("$resilience",Math.Clamp(state.Resilience,0,100));save.Parameters.AddWithValue("$trigger",state.LastTrigger);save.Parameters.AddWithValue("$support",state.NeedsSupport);save.Parameters.AddWithValue("$updated",state.UpdatedAt.ToString("O"));save.ExecuteNonQuery();tx.Commit();return true;
     }
     public void SaveCharacterState(CharacterState state){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="INSERT INTO character_states(character_id,mood,concerns,ambitions,satisfaction,reaction_state,updated_at) VALUES($id,$mood,$concerns,$ambitions,$satisfaction,$reaction,$now) ON CONFLICT(character_id) DO UPDATE SET mood=excluded.mood,concerns=excluded.concerns,ambitions=excluded.ambitions,satisfaction=excluded.satisfaction,reaction_state=excluded.reaction_state,updated_at=excluded.updated_at";cmd.Parameters.AddWithValue("$id",state.CharacterId);cmd.Parameters.AddWithValue("$mood",state.Mood);cmd.Parameters.AddWithValue("$concerns",state.Concerns);cmd.Parameters.AddWithValue("$ambitions",state.Ambitions);cmd.Parameters.AddWithValue("$satisfaction",Math.Clamp(state.Satisfaction,0,100));cmd.Parameters.AddWithValue("$reaction",state.ReactionState);cmd.Parameters.AddWithValue("$now",(state.UpdatedAt==default?DateTime.UtcNow:state.UpdatedAt).ToString("O"));cmd.ExecuteNonQuery();}
+    /// <summary>Applies bounded relationship movement for a match exactly once, so rescans cannot inflate it.</summary>
+    public bool SaveRelationshipsOnce(long careerId,long matchId,IEnumerable<Relationship> relationships)
+    {
+        using var db=Open();using var tx=db.BeginTransaction();var now=DateTime.UtcNow.ToString("O");
+        using(var job=db.CreateCommand()){job.Transaction=tx;job.CommandText="INSERT OR IGNORE INTO generation_jobs(career_id,event_id,kind,dedupe_key,status,created_at,updated_at) VALUES($career,$match,'match_relationships',$key,'complete',$now,$now)";job.Parameters.AddWithValue("$career",careerId);job.Parameters.AddWithValue("$match",matchId);job.Parameters.AddWithValue("$key",$"match-relationships:{careerId}:{matchId}");job.Parameters.AddWithValue("$now",now);if(job.ExecuteNonQuery()!=1){tx.Rollback();return false;}}
+        foreach(var relationship in relationships)
+        {
+            using var cmd=db.CreateCommand();cmd.Transaction=tx;
+            cmd.CommandText="UPDATE relationships SET score=$score,trust=$trust,respect=$respect,friendliness=$friendly,rivalry=$rivalry,tension=$tension,familiarity=$familiarity WHERE character_id=$character";
+            cmd.Parameters.AddWithValue("$score",relationship.Score);cmd.Parameters.AddWithValue("$trust",relationship.Trust);cmd.Parameters.AddWithValue("$respect",relationship.Respect);
+            cmd.Parameters.AddWithValue("$friendly",relationship.Friendliness);cmd.Parameters.AddWithValue("$rivalry",relationship.Rivalry);cmd.Parameters.AddWithValue("$tension",relationship.Tension);
+            cmd.Parameters.AddWithValue("$familiarity",relationship.Familiarity);cmd.Parameters.AddWithValue("$character",relationship.CharacterId);cmd.ExecuteNonQuery();
+        }
+        tx.Commit();return true;
+    }
+
     public bool SaveCharacterStatesOnce(long careerId,string dedupeKey,IEnumerable<CharacterState> states)
     {
         using var db=Open();using var tx=db.BeginTransaction();var now=DateTime.UtcNow.ToString("O");using(var job=db.CreateCommand()){job.Transaction=tx;job.CommandText="INSERT OR IGNORE INTO generation_jobs(career_id,kind,dedupe_key,status,created_at,updated_at) VALUES($career,'character_state',$key,'complete',$now,$now)";job.Parameters.AddWithValue("$career",careerId);job.Parameters.AddWithValue("$key",dedupeKey);job.Parameters.AddWithValue("$now",now);if(job.ExecuteNonQuery()!=1){tx.Rollback();return false;}}
         foreach(var state in states){using var cmd=db.CreateCommand();cmd.Transaction=tx;cmd.CommandText="INSERT INTO character_states(character_id,mood,concerns,ambitions,satisfaction,reaction_state,updated_at) VALUES($id,$mood,$concerns,$ambitions,$satisfaction,$reaction,$updated) ON CONFLICT(character_id) DO UPDATE SET mood=excluded.mood,concerns=excluded.concerns,ambitions=excluded.ambitions,satisfaction=excluded.satisfaction,reaction_state=excluded.reaction_state,updated_at=excluded.updated_at";cmd.Parameters.AddWithValue("$id",state.CharacterId);cmd.Parameters.AddWithValue("$mood",state.Mood);cmd.Parameters.AddWithValue("$concerns",state.Concerns);cmd.Parameters.AddWithValue("$ambitions",state.Ambitions);cmd.Parameters.AddWithValue("$satisfaction",Math.Clamp(state.Satisfaction,0,100));cmd.Parameters.AddWithValue("$reaction",state.ReactionState);cmd.Parameters.AddWithValue("$updated",(state.UpdatedAt==default?DateTime.UtcNow:state.UpdatedAt).ToString("O"));cmd.ExecuteNonQuery();}tx.Commit();return true;
     }
-    public void ApplyNarrativesOnce(long careerId,long matchId,IEnumerable<string> active)
+    public void ApplyNarrativesOnce(long careerId,long matchId,IEnumerable<string> active,IEnumerable<string>? resolved=null)
     {
         using var db=Open();using var tx=db.BeginTransaction();var now=DateTime.UtcNow.ToString("O");using(var job=db.CreateCommand()){job.Transaction=tx;job.CommandText="INSERT OR IGNORE INTO generation_jobs(career_id,event_id,kind,dedupe_key,status,created_at,updated_at) VALUES($career,$match,'narratives',$key,'complete',$now,$now)";job.Parameters.AddWithValue("$career",careerId);job.Parameters.AddWithValue("$match",matchId);job.Parameters.AddWithValue("$key",$"narratives:{careerId}:{matchId}");job.Parameters.AddWithValue("$now",now);if(job.ExecuteNonQuery()!=1){tx.Rollback();return;}}
-        Exec(db,tx,"UPDATE narratives SET strength=max(0,strength-5),status=CASE WHEN strength-5<=15 THEN 'faded' ELSE status END WHERE career_id=$career",("$career",careerId));foreach(var type in active){using var cmd=db.CreateCommand();cmd.Transaction=tx;cmd.CommandText="INSERT INTO narratives(career_id,type,strength,status,last_updated,evidence_json) VALUES($career,$type,50,'active',$now,$evidence) ON CONFLICT(career_id,type) DO UPDATE SET strength=min(100,strength+10),status='active',last_updated=$now,evidence_json=$evidence";cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$type",type);cmd.Parameters.AddWithValue("$now",now);cmd.Parameters.AddWithValue("$evidence",JsonSerializer.Serialize(new{matchId}));cmd.ExecuteNonQuery();}tx.Commit();
+        Exec(db,tx,"UPDATE narratives SET strength=max(0,strength-5),status=CASE WHEN strength-5<=15 THEN 'faded' ELSE status END WHERE career_id=$career",("$career",careerId));
+        // A storyline the latest match has contradicted ends now instead of lingering and describing
+        // something that is no longer true.
+        foreach(var type in resolved??[])Exec(db,tx,"UPDATE narratives SET strength=0,status='faded',last_updated=$now WHERE career_id=$career AND type=$type",("$now",now),("$career",careerId),("$type",type));
+        foreach(var type in active){using var cmd=db.CreateCommand();cmd.Transaction=tx;cmd.CommandText="INSERT INTO narratives(career_id,type,strength,status,last_updated,evidence_json) VALUES($career,$type,50,'active',$now,$evidence) ON CONFLICT(career_id,type) DO UPDATE SET strength=min(100,strength+10),status='active',last_updated=$now,evidence_json=$evidence";cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$type",type);cmd.Parameters.AddWithValue("$now",now);cmd.Parameters.AddWithValue("$evidence",JsonSerializer.Serialize(new{matchId}));cmd.ExecuteNonQuery();}tx.Commit();
     }
     public bool ApplyStatementConsequencesOnce(long careerId,string dedupeKey,long eventId,IEnumerable<Relationship> relationships,string memoryText,int importance,int valence,DateTime timestamp)
     {
@@ -298,15 +349,15 @@ public sealed class Database(string path)
     public long SaveMatch(long careerId, MatchInput m)
     {
         using var db = Open(); using var cmd = db.CreateCommand();
-        cmd.CommandText = "INSERT INTO matches(career_id,date,competition,opponent,is_home,team_score,opponent_score,started,minutes,goals,assists,rating,yellow_card,red_card,penalty_scored,penalty_missed,notes,next_opponent,is_derby,is_major,result,created_at,started_known,team_context,representing_team,score_known) " +
-          "VALUES($career,$date,$comp,$opp,$home,$ts,$os,$started,$min,$goals,$assists,$rating,$yellow,$red,$ps,$pm,$notes,$next,$derby,$major,$result,$now,$startedKnown,$context,$team,$scoreKnown); SELECT last_insert_rowid();";
-        var values = new Dictionary<string,object?> { ["$career"]=careerId,["$date"]=m.Date,["$comp"]=m.Competition,["$opp"]=m.Opponent,["$home"]=m.IsHome,["$ts"]=m.TeamScore,["$os"]=m.OpponentScore,["$started"]=m.Started,["$min"]=m.Minutes,["$goals"]=m.Goals,["$assists"]=m.Assists,["$rating"]=m.Rating,["$yellow"]=m.YellowCard,["$red"]=m.RedCard,["$ps"]=m.PenaltyScored,["$pm"]=m.PenaltyMissed,["$notes"]=m.Notes,["$next"]=m.NextOpponent,["$derby"]=m.IsDerby,["$major"]=m.IsMajorFixture,["$result"]=m.ScoreKnown?m.TeamScore>m.OpponentScore?"W":m.TeamScore<m.OpponentScore?"L":"D":"U",["$now"]=DateTime.UtcNow.ToString("O"),["$startedKnown"]=m.StartedKnown,["$context"]=m.TeamContext,["$team"]=m.RepresentingTeam,["$scoreKnown"]=m.ScoreKnown };
+        cmd.CommandText = "INSERT INTO matches(career_id,date,competition,opponent,is_home,team_score,opponent_score,started,minutes,goals,assists,rating,yellow_card,red_card,penalty_scored,penalty_missed,notes,next_opponent,is_derby,is_major,result,created_at,started_known,team_context,representing_team,score_known,is_home_known) " +
+          "VALUES($career,$date,$comp,$opp,$home,$ts,$os,$started,$min,$goals,$assists,$rating,$yellow,$red,$ps,$pm,$notes,$next,$derby,$major,$result,$now,$startedKnown,$context,$team,$scoreKnown,$homeKnown); SELECT last_insert_rowid();";
+        var values = new Dictionary<string,object?> { ["$career"]=careerId,["$date"]=m.Date,["$comp"]=m.Competition,["$opp"]=m.Opponent,["$home"]=m.IsHome,["$ts"]=m.TeamScore,["$os"]=m.OpponentScore,["$started"]=m.Started,["$min"]=m.Minutes,["$goals"]=m.Goals,["$assists"]=m.Assists,["$rating"]=m.Rating,["$yellow"]=m.YellowCard,["$red"]=m.RedCard,["$ps"]=m.PenaltyScored,["$pm"]=m.PenaltyMissed,["$notes"]=m.Notes,["$next"]=m.NextOpponent,["$derby"]=m.IsDerby,["$major"]=m.IsMajorFixture,["$result"]=m.ScoreKnown?m.TeamScore>m.OpponentScore?"W":m.TeamScore<m.OpponentScore?"L":"D":"U",["$now"]=DateTime.UtcNow.ToString("O"),["$startedKnown"]=m.StartedKnown,["$context"]=m.TeamContext,["$team"]=m.RepresentingTeam,["$scoreKnown"]=m.ScoreKnown,["$homeKnown"]=m.IsHomeKnown };
         foreach(var p in values) cmd.Parameters.AddWithValue(p.Key,p.Value ?? DBNull.Value); return (long)cmd.ExecuteScalar()!;
     }
     public (long MatchId,bool Created) SaveProviderMatch(long careerId,string provider,string eventKey,MatchInput m)
     {
         using var db=Open();using var tx=db.BeginTransaction();using(var existing=db.CreateCommand()){existing.Transaction=tx;existing.CommandText="SELECT match_id FROM provider_match_links WHERE career_id=$career AND provider=$provider AND event_key=$event";existing.Parameters.AddWithValue("$career",careerId);existing.Parameters.AddWithValue("$provider",provider);existing.Parameters.AddWithValue("$event",eventKey);var value=existing.ExecuteScalar();if(value is not null){tx.Commit();return(Convert.ToInt64(value),false);}}
-        using var cmd=db.CreateCommand();cmd.Transaction=tx;cmd.CommandText="INSERT INTO matches(career_id,date,competition,opponent,is_home,team_score,opponent_score,started,minutes,goals,assists,rating,yellow_card,red_card,penalty_scored,penalty_missed,notes,next_opponent,is_derby,is_major,result,created_at,started_known,team_context,representing_team,score_known) VALUES($career,$date,$comp,$opp,$home,$ts,$os,$started,$min,$goals,$assists,$rating,$yellow,$red,$ps,$pm,$notes,$next,$derby,$major,$result,$now,$startedKnown,$context,$team,$scoreKnown); SELECT last_insert_rowid();";var now=DateTime.UtcNow.ToString("O");var values=new Dictionary<string,object?>{{"$career",careerId},{"$date",m.Date},{"$comp",m.Competition},{"$opp",m.Opponent},{"$home",m.IsHome},{"$ts",m.TeamScore},{"$os",m.OpponentScore},{"$started",m.Started},{"$min",m.Minutes},{"$goals",m.Goals},{"$assists",m.Assists},{"$rating",m.Rating},{"$yellow",m.YellowCard},{"$red",m.RedCard},{"$ps",m.PenaltyScored},{"$pm",m.PenaltyMissed},{"$notes",m.Notes},{"$next",m.NextOpponent},{"$derby",m.IsDerby},{"$major",m.IsMajorFixture},{"$result",m.ScoreKnown?m.TeamScore>m.OpponentScore?"W":m.TeamScore<m.OpponentScore?"L":"D":"U"},{"$now",now},{"$startedKnown",m.StartedKnown},{"$context",m.TeamContext},{"$team",m.RepresentingTeam},{"$scoreKnown",m.ScoreKnown}};foreach(var p in values)cmd.Parameters.AddWithValue(p.Key,p.Value??DBNull.Value);var matchId=(long)cmd.ExecuteScalar()!;using var link=db.CreateCommand();link.Transaction=tx;link.CommandText="INSERT INTO provider_match_links(career_id,provider,event_key,match_id,status,created_at,updated_at) VALUES($career,$provider,$event,$match,'Processing',$now,$now)";link.Parameters.AddWithValue("$career",careerId);link.Parameters.AddWithValue("$provider",provider);link.Parameters.AddWithValue("$event",eventKey);link.Parameters.AddWithValue("$match",matchId);link.Parameters.AddWithValue("$now",now);link.ExecuteNonQuery();tx.Commit();return(matchId,true);
+        using var cmd=db.CreateCommand();cmd.Transaction=tx;cmd.CommandText="INSERT INTO matches(career_id,date,competition,opponent,is_home,team_score,opponent_score,started,minutes,goals,assists,rating,yellow_card,red_card,penalty_scored,penalty_missed,notes,next_opponent,is_derby,is_major,result,created_at,started_known,team_context,representing_team,score_known,is_home_known) VALUES($career,$date,$comp,$opp,$home,$ts,$os,$started,$min,$goals,$assists,$rating,$yellow,$red,$ps,$pm,$notes,$next,$derby,$major,$result,$now,$startedKnown,$context,$team,$scoreKnown,$homeKnown); SELECT last_insert_rowid();";var now=DateTime.UtcNow.ToString("O");var values=new Dictionary<string,object?>{{"$career",careerId},{"$date",m.Date},{"$comp",m.Competition},{"$opp",m.Opponent},{"$home",m.IsHome},{"$ts",m.TeamScore},{"$os",m.OpponentScore},{"$started",m.Started},{"$min",m.Minutes},{"$goals",m.Goals},{"$assists",m.Assists},{"$rating",m.Rating},{"$yellow",m.YellowCard},{"$red",m.RedCard},{"$ps",m.PenaltyScored},{"$pm",m.PenaltyMissed},{"$notes",m.Notes},{"$next",m.NextOpponent},{"$derby",m.IsDerby},{"$major",m.IsMajorFixture},{"$result",m.ScoreKnown?m.TeamScore>m.OpponentScore?"W":m.TeamScore<m.OpponentScore?"L":"D":"U"},{"$now",now},{"$startedKnown",m.StartedKnown},{"$context",m.TeamContext},{"$team",m.RepresentingTeam},{"$scoreKnown",m.ScoreKnown},{"$homeKnown",m.IsHomeKnown}};foreach(var p in values)cmd.Parameters.AddWithValue(p.Key,p.Value??DBNull.Value);var matchId=(long)cmd.ExecuteScalar()!;using var link=db.CreateCommand();link.Transaction=tx;link.CommandText="INSERT INTO provider_match_links(career_id,provider,event_key,match_id,status,created_at,updated_at) VALUES($career,$provider,$event,$match,'Processing',$now,$now)";link.Parameters.AddWithValue("$career",careerId);link.Parameters.AddWithValue("$provider",provider);link.Parameters.AddWithValue("$event",eventKey);link.Parameters.AddWithValue("$match",matchId);link.Parameters.AddWithValue("$now",now);link.ExecuteNonQuery();tx.Commit();return(matchId,true);
     }
     public void CompleteProviderMatch(long careerId,string provider,string eventKey){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="UPDATE provider_match_links SET status='Complete',updated_at=$now WHERE career_id=$career AND provider=$provider AND event_key=$event";cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$provider",provider);cmd.Parameters.AddWithValue("$event",eventKey);cmd.Parameters.AddWithValue("$now",DateTime.UtcNow.ToString("O"));cmd.ExecuteNonQuery();}
 
@@ -323,9 +374,9 @@ public sealed class Database(string path)
             UPDATE matches SET date=$date,competition=$comp,opponent=$opp,is_home=$home,team_score=$ts,opponent_score=$os,
               started=$started,minutes=$min,goals=$goals,assists=$assists,rating=$rating,yellow_card=$yellow,red_card=$red,
               penalty_scored=$ps,penalty_missed=$pm,notes=$notes,next_opponent=$next,is_derby=$derby,is_major=$major,
-              result=$result,started_known=$startedKnown,team_context=$context,representing_team=$team,score_known=$scoreKnown WHERE career_id=$career AND id=$match
+              result=$result,started_known=$startedKnown,team_context=$context,representing_team=$team,score_known=$scoreKnown,is_home_known=$homeKnown WHERE career_id=$career AND id=$match
             """;
-        var values=new Dictionary<string,object?>{{"$career",careerId},{"$match",matchId},{"$date",m.Date},{"$comp",m.Competition},{"$opp",m.Opponent},{"$home",m.IsHome},{"$ts",m.TeamScore},{"$os",m.OpponentScore},{"$started",m.Started},{"$min",m.Minutes},{"$goals",m.Goals},{"$assists",m.Assists},{"$rating",m.Rating},{"$yellow",m.YellowCard},{"$red",m.RedCard},{"$ps",m.PenaltyScored},{"$pm",m.PenaltyMissed},{"$notes",m.Notes},{"$next",m.NextOpponent},{"$derby",m.IsDerby},{"$major",m.IsMajorFixture},{"$result",m.ScoreKnown?m.TeamScore>m.OpponentScore?"W":m.TeamScore<m.OpponentScore?"L":"D":"U"},{"$startedKnown",m.StartedKnown},{"$context",m.TeamContext},{"$team",m.RepresentingTeam},{"$scoreKnown",m.ScoreKnown}};
+        var values=new Dictionary<string,object?>{{"$career",careerId},{"$match",matchId},{"$date",m.Date},{"$comp",m.Competition},{"$opp",m.Opponent},{"$home",m.IsHome},{"$ts",m.TeamScore},{"$os",m.OpponentScore},{"$started",m.Started},{"$min",m.Minutes},{"$goals",m.Goals},{"$assists",m.Assists},{"$rating",m.Rating},{"$yellow",m.YellowCard},{"$red",m.RedCard},{"$ps",m.PenaltyScored},{"$pm",m.PenaltyMissed},{"$notes",m.Notes},{"$next",m.NextOpponent},{"$derby",m.IsDerby},{"$major",m.IsMajorFixture},{"$result",m.ScoreKnown?m.TeamScore>m.OpponentScore?"W":m.TeamScore<m.OpponentScore?"L":"D":"U"},{"$startedKnown",m.StartedKnown},{"$context",m.TeamContext},{"$team",m.RepresentingTeam},{"$scoreKnown",m.ScoreKnown},{"$homeKnown",m.IsHomeKnown}};
         foreach(var p in values)cmd.Parameters.AddWithValue(p.Key,p.Value??DBNull.Value);if(cmd.ExecuteNonQuery()!=1)throw new KeyNotFoundException("Match not found.");
     }
     public void ClearGeneratedMatchWorld(long careerId,long matchId)
@@ -348,7 +399,7 @@ public sealed class Database(string path)
         if(IsProviderMatch(careerId,matchId))throw new InvalidOperationException("FIFA synchronized matches cannot be deleted. Correct the reviewed fields instead so the import baseline remains safe.");
         ClearGeneratedMatchWorld(careerId,matchId);using var db=Open();using var tx=db.BeginTransaction();Exec(db,tx,"UPDATE fixtures SET status='Upcoming',updated_at=$now WHERE career_id=$career AND status='Completed' AND EXISTS(SELECT 1 FROM matches m WHERE m.id=$match AND m.date=fixtures.date AND lower(m.opponent)=lower(fixtures.opponent))",("$now",DateTime.UtcNow.ToString("O")),("$career",careerId),("$match",matchId));Exec(db,tx,"DELETE FROM matches WHERE career_id=$career AND id=$match",("$career",careerId),("$match",matchId));tx.Commit();
     }
-    private static CareerMatch ReadMatch(SqliteDataReader r){int O(string name)=>r.GetOrdinal(name);var careerId=r.GetInt64(O("career_id"));var m=new MatchInput(r.GetString(O("date")),r.GetString(O("competition")),r.GetString(O("opponent")),r.GetBoolean(O("is_home")),r.GetInt32(O("team_score")),r.GetInt32(O("opponent_score")),r.GetBoolean(O("started")),r.GetInt32(O("minutes")),r.GetInt32(O("goals")),r.GetInt32(O("assists")),r.GetDouble(O("rating")),r.GetBoolean(O("yellow_card")),r.GetBoolean(O("red_card")),r.GetBoolean(O("penalty_scored")),r.GetBoolean(O("penalty_missed")),r.GetString(O("notes")),r.IsDBNull(O("next_opponent"))?null:r.GetString(O("next_opponent")),r.GetBoolean(O("is_derby")),r.GetBoolean(O("is_major")),r.GetBoolean(O("started_known")),r.GetString(O("team_context")),r.GetString(O("representing_team")),r.GetBoolean(O("score_known")));return new(r.GetInt64(O("id")),careerId,m,r.GetString(O("result")),DateTime.Parse(r.GetString(O("created_at"))));}
+    private static CareerMatch ReadMatch(SqliteDataReader r){int O(string name)=>r.GetOrdinal(name);var careerId=r.GetInt64(O("career_id"));var m=new MatchInput(r.GetString(O("date")),r.GetString(O("competition")),r.GetString(O("opponent")),r.GetBoolean(O("is_home")),r.GetInt32(O("team_score")),r.GetInt32(O("opponent_score")),r.GetBoolean(O("started")),r.GetInt32(O("minutes")),r.GetInt32(O("goals")),r.GetInt32(O("assists")),r.GetDouble(O("rating")),r.GetBoolean(O("yellow_card")),r.GetBoolean(O("red_card")),r.GetBoolean(O("penalty_scored")),r.GetBoolean(O("penalty_missed")),r.GetString(O("notes")),r.IsDBNull(O("next_opponent"))?null:r.GetString(O("next_opponent")),r.GetBoolean(O("is_derby")),r.GetBoolean(O("is_major")),r.GetBoolean(O("started_known")),r.GetString(O("team_context")),r.GetString(O("representing_team")),r.GetBoolean(O("score_known")),r.GetBoolean(O("is_home_known")));return new(r.GetInt64(O("id")),careerId,m,r.GetString(O("result")),DateTime.Parse(r.GetString(O("created_at"))));}
 
     public void UpsertFixture(long careerId,string provider,string eventKey,string date,string competition,string opponent,
         bool isHome,int confidence,string evidence,string sourceFingerprint,string teamContext="Club",string representingTeam="",string availability="Unknown")
@@ -438,14 +489,13 @@ public sealed class Database(string path)
     {
         using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="INSERT OR IGNORE INTO notifications(career_id,kind,title,body,action,priority,dedupe_key,created_at) VALUES($c,$kind,$title,$body,$action,$priority,$dedupe,$now)";cmd.Parameters.AddWithValue("$c",careerId);cmd.Parameters.AddWithValue("$kind",kind);cmd.Parameters.AddWithValue("$title",title);cmd.Parameters.AddWithValue("$body",body);cmd.Parameters.AddWithValue("$action",action);cmd.Parameters.AddWithValue("$priority",Math.Clamp(priority,1,100));cmd.Parameters.AddWithValue("$dedupe",dedupeKey);cmd.Parameters.AddWithValue("$now",(timestamp??DateTime.UtcNow).ToString("O"));return cmd.ExecuteNonQuery()==1;
     }
-    public bool AddAutomaticReaction(long careerId,long characterId,long eventId,SceneType scene,string context,string text,int importance,int valence,string topic,string notificationKind,string title,string notificationAction,int priority,string dedupeKey,DateTime timestamp,bool queueLlm=true)
+    public bool AddAutomaticReaction(long careerId,long characterId,long eventId,SceneType scene,string context,string text,int importance,int valence,string topic,string notificationKind,string title,string notificationAction,int priority,string dedupeKey,DateTime timestamp)
     {
         using var db=Open();using var tx=db.BeginTransaction();var when=timestamp.ToString("O");
         using(var notice=db.CreateCommand()){notice.Transaction=tx;notice.CommandText="INSERT OR IGNORE INTO notifications(career_id,kind,title,body,action,priority,dedupe_key,created_at) VALUES($c,$kind,$title,$body,$action,$priority,$dedupe,$now)";notice.Parameters.AddWithValue("$c",careerId);notice.Parameters.AddWithValue("$kind",notificationKind);notice.Parameters.AddWithValue("$title",title);notice.Parameters.AddWithValue("$body",text);notice.Parameters.AddWithValue("$action",notificationAction);notice.Parameters.AddWithValue("$priority",Math.Clamp(priority,1,100));notice.Parameters.AddWithValue("$dedupe",dedupeKey);notice.Parameters.AddWithValue("$now",when);if(notice.ExecuteNonQuery()!=1){tx.Rollback();return false;}}
         long conversationId;using(var conversation=db.CreateCommand()){conversation.Transaction=tx;conversation.CommandText="INSERT INTO conversations(career_id,character_id,scene,timestamp,context_json) VALUES($career,$character,$scene,$now,$context); SELECT last_insert_rowid();";conversation.Parameters.AddWithValue("$career",careerId);conversation.Parameters.AddWithValue("$character",characterId);conversation.Parameters.AddWithValue("$scene",scene.ToString());conversation.Parameters.AddWithValue("$now",when);conversation.Parameters.AddWithValue("$context",context);conversationId=(long)conversation.ExecuteScalar()!;}
         using(var message=db.CreateCommand()){message.Transaction=tx;message.CommandText="INSERT INTO messages(conversation_id,role,content,timestamp) VALUES($conversation,'assistant',$text,$now)";message.Parameters.AddWithValue("$conversation",conversationId);message.Parameters.AddWithValue("$text",text);message.Parameters.AddWithValue("$now",when);message.ExecuteNonQuery();}
         using(var memory=db.CreateCommand()){memory.Transaction=tx;memory.CommandText="INSERT INTO memories(career_id,character_id,event_id,text,timestamp,importance,valence,topic) VALUES($career,$character,$event,$text,$now,$importance,$valence,$topic)";memory.Parameters.AddWithValue("$career",careerId);memory.Parameters.AddWithValue("$character",characterId);memory.Parameters.AddWithValue("$event",eventId);memory.Parameters.AddWithValue("$text",text);memory.Parameters.AddWithValue("$now",when);memory.Parameters.AddWithValue("$importance",Math.Clamp(importance,1,100));memory.Parameters.AddWithValue("$valence",Math.Clamp(valence,-100,100));memory.Parameters.AddWithValue("$topic",topic);memory.ExecuteNonQuery();}
-        if(queueLlm){using var job=db.CreateCommand();job.Transaction=tx;job.CommandText="INSERT OR IGNORE INTO generation_jobs(career_id,event_id,kind,dedupe_key,status,payload_json,created_at,updated_at) VALUES($career,$event,'automatic_reaction_llm',$key,'Pending',$payload,$now,$now)";job.Parameters.AddWithValue("$career",careerId);job.Parameters.AddWithValue("$event",eventId);job.Parameters.AddWithValue("$key",$"reaction-llm:{careerId}:{eventId}:{characterId}");job.Parameters.AddWithValue("$payload",JsonSerializer.Serialize(new{conversationId,characterId,eventId,scene=scene.ToString(),notificationDedupeKey=dedupeKey}));job.Parameters.AddWithValue("$now",DateTime.UtcNow.ToString("O"));job.ExecuteNonQuery();}
         tx.Commit();return true;
     }
     public IReadOnlyList<CareerNotification> GetNotifications(long careerId,int limit=100)
@@ -478,17 +528,119 @@ public sealed class Database(string path)
     public IReadOnlyList<GenerationJob> GetGenerationJobs(long careerId,string kind){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT id,career_id,event_id,kind,dedupe_key,status,attempts,error,payload_json,created_at,updated_at FROM generation_jobs WHERE career_id=$career AND kind=$kind ORDER BY created_at,id";cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$kind",kind);using var r=cmd.ExecuteReader();var jobs=new List<GenerationJob>();while(r.Read())jobs.Add(new(r.GetInt64(0),r.GetInt64(1),r.IsDBNull(2)?null:r.GetInt64(2),r.GetString(3),r.GetString(4),r.GetString(5),r.GetInt32(6),r.IsDBNull(7)?null:r.GetString(7),r.GetString(8),DateTime.Parse(r.GetString(9)),DateTime.Parse(r.GetString(10))));return jobs;}
     public void CompleteGenerationJob(long id){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="UPDATE generation_jobs SET status='Complete',error=NULL,updated_at=$now WHERE id=$id";cmd.Parameters.AddWithValue("$id",id);cmd.Parameters.AddWithValue("$now",DateTime.UtcNow.ToString("O"));cmd.ExecuteNonQuery();}
     public void FailGenerationJob(long id,string error,int maxAttempts=3){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="UPDATE generation_jobs SET attempts=attempts+1,status=CASE WHEN attempts+1 >= $max THEN 'Failed' ELSE 'Pending' END,error=$error,updated_at=$now WHERE id=$id";cmd.Parameters.AddWithValue("$id",id);cmd.Parameters.AddWithValue("$max",maxAttempts);cmd.Parameters.AddWithValue("$error",error.Length>500?error[..500]:error);cmd.Parameters.AddWithValue("$now",DateTime.UtcNow.ToString("O"));cmd.ExecuteNonQuery();}
-    public void ReplaceAutomaticReactionText(long careerId,long conversationId,long characterId,long eventId,string notificationDedupeKey,string text)
-    {
-        using var db=Open();using var tx=db.BeginTransaction();Exec(db,tx,"UPDATE messages SET content=$text WHERE conversation_id=$conversation AND role='assistant'",("$text",text),("$conversation",conversationId));Exec(db,tx,"UPDATE notifications SET body=$text WHERE career_id=$career AND dedupe_key=$dedupe",("$text",text),("$career",careerId),("$dedupe",notificationDedupeKey));Exec(db,tx,"UPDATE memories SET text=$text WHERE career_id=$career AND character_id=$character AND event_id=$event AND topic='automatic post-match reaction'",("$text",text),("$career",careerId),("$character",characterId),("$event",eventId));tx.Commit();
-    }
     public void UpdateCareerFromProvider(long id,string playerName,string nationality,int age,string club,string league,string season,string currentDate,string position,int shirtNumber){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="UPDATE careers SET player_name=$player,nationality=$nation,age=$age,club=$club,league=$league,season=$season,current_date=$date,position=$position,shirt_number=$number,updated_at=$now WHERE id=$id";cmd.Parameters.AddWithValue("$player",playerName);cmd.Parameters.AddWithValue("$nation",nationality);cmd.Parameters.AddWithValue("$age",age);cmd.Parameters.AddWithValue("$club",club);cmd.Parameters.AddWithValue("$league",league);cmd.Parameters.AddWithValue("$season",season);cmd.Parameters.AddWithValue("$date",currentDate);cmd.Parameters.AddWithValue("$position",position);cmd.Parameters.AddWithValue("$number",shirtNumber);cmd.Parameters.AddWithValue("$now",DateTime.UtcNow.ToString("O"));cmd.Parameters.AddWithValue("$id",id);cmd.ExecuteNonQuery();}
 
-    public void Backup(string destination){Directory.CreateDirectory(System.IO.Path.GetDirectoryName(destination)!);using var source=Open();using var target=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=destination}.ToString());target.Open();source.BackupDatabase(target);}
+    public void SaveMatchPerformances(long careerId,long matchId,string provider,IEnumerable<MatchPerformance> performances)
+    {
+        using var db=Open();using var tx=db.BeginTransaction();
+        foreach(var p in performances)
+        {
+            using var cmd=db.CreateCommand();cmd.Transaction=tx;
+            cmd.CommandText="INSERT INTO match_performances(career_id,match_id,provider,external_id,name,position,started,minutes,rating) VALUES($career,$match,$provider,$external,$name,$position,$started,$minutes,$rating) ON CONFLICT(match_id,provider,external_id) DO UPDATE SET name=excluded.name,position=excluded.position,started=excluded.started,minutes=excluded.minutes,rating=excluded.rating";
+            cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$match",matchId);cmd.Parameters.AddWithValue("$provider",provider);
+            cmd.Parameters.AddWithValue("$external",p.ExternalId);cmd.Parameters.AddWithValue("$name",p.Name);cmd.Parameters.AddWithValue("$position",p.Position);
+            cmd.Parameters.AddWithValue("$started",p.Started);cmd.Parameters.AddWithValue("$minutes",p.Minutes);cmd.Parameters.AddWithValue("$rating",p.Rating);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+    public IReadOnlyList<MatchPerformance> GetMatchPerformances(long matchId)
+    {
+        using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT external_id,name,position,started,minutes,rating FROM match_performances WHERE match_id=$match ORDER BY rating DESC,minutes DESC";
+        cmd.Parameters.AddWithValue("$match",matchId);using var r=cmd.ExecuteReader();var list=new List<MatchPerformance>();
+        while(r.Read())list.Add(new(r.GetString(0),r.GetString(1),r.GetString(2),r.GetBoolean(3),r.GetInt32(4),r.GetDouble(5)));return list;
+    }
+    /// <summary>Remembers provider articles so a report that scrolls out of the game's rolling news feed is still available later.</summary>
+    public int CacheProviderNews(long careerId,string provider,IEnumerable<CachedProviderArticle> articles)
+    {
+        var added=0;using var db=Open();using var tx=db.BeginTransaction();var now=DateTime.UtcNow.ToString("O");
+        foreach(var article in articles)
+        {
+            using var cmd=db.CreateCommand();cmd.Transaction=tx;
+            cmd.CommandText="INSERT OR IGNORE INTO provider_news_cache(career_id,provider,article_key,date,team_id,related_team_id,title,body,first_seen) VALUES($career,$provider,$key,$date,$team,$related,$title,$body,$now)";
+            cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$provider",provider);cmd.Parameters.AddWithValue("$key",article.Key);
+            cmd.Parameters.AddWithValue("$date",article.Date);cmd.Parameters.AddWithValue("$team",article.TeamId);cmd.Parameters.AddWithValue("$related",article.RelatedTeamId);
+            cmd.Parameters.AddWithValue("$title",article.Title);cmd.Parameters.AddWithValue("$body",article.Body);cmd.Parameters.AddWithValue("$now",now);
+            added+=cmd.ExecuteNonQuery();
+        }
+        tx.Commit();return added;
+    }
+    public IReadOnlyList<CachedProviderArticle> GetCachedProviderNews(long careerId,string provider,int limit=400)
+    {
+        using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT article_key,date,team_id,related_team_id,title,body FROM provider_news_cache WHERE career_id=$career AND provider=$provider ORDER BY date DESC,id DESC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$provider",provider);cmd.Parameters.AddWithValue("$limit",limit);
+        using var r=cmd.ExecuteReader();var list=new List<CachedProviderArticle>();
+        while(r.Read())list.Add(new(r.GetString(0),r.GetString(1),r.GetInt32(2),r.GetInt32(3),r.GetString(4),r.GetString(5)));return list;
+    }
+    /// <summary>Matches imported from a provider whose final score FIFA had not published yet.</summary>
+    public IReadOnlyList<CareerMatch> GetUnscoredProviderMatches(long careerId,int limit=20)
+    {
+        using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT m.* FROM matches m JOIN provider_match_links l ON l.match_id=m.id WHERE m.career_id=$career AND m.score_known=0 ORDER BY m.date DESC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$limit",limit);using var r=cmd.ExecuteReader();
+        var list=new List<CareerMatch>();while(r.Read())list.Add(ReadMatch(r));return list;
+    }
+    public bool ConfirmMatchScore(long careerId,long matchId,int teamScore,int opponentScore)
+    {
+        using var db=Open();using var cmd=db.CreateCommand();
+        cmd.CommandText="UPDATE matches SET team_score=$team,opponent_score=$opponent,score_known=1,result=$result WHERE career_id=$career AND id=$match AND score_known=0";
+        cmd.Parameters.AddWithValue("$team",teamScore);cmd.Parameters.AddWithValue("$opponent",opponentScore);
+        cmd.Parameters.AddWithValue("$result",teamScore>opponentScore?"W":teamScore<opponentScore?"L":"D");
+        cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$match",matchId);return cmd.ExecuteNonQuery()==1;
+    }
+    public IReadOnlyList<string> GetRecentDialogueKeys(long careerId,long characterId,int limit=60)
+    {
+        using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT phrase_key FROM dialogue_usage WHERE career_id=$career AND character_id=$character ORDER BY used_at DESC,id DESC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$character",characterId);cmd.Parameters.AddWithValue("$limit",limit);
+        using var r=cmd.ExecuteReader();var list=new List<string>();while(r.Read())list.Add(r.GetString(0));return list;
+    }
+    /// <summary>
+    /// Phrases other people in this career have used lately. A line that a team-mate sent last month reads
+    /// as copied when it turns up from someone else, so the composer treats these as taken.
+    /// </summary>
+    public IReadOnlyList<string> GetRecentDialogueKeysFromOthers(long careerId,long characterId,int limit=30)
+    {
+        using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT phrase_key FROM dialogue_usage WHERE career_id=$career AND character_id<>$character ORDER BY used_at DESC,id DESC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$character",characterId);cmd.Parameters.AddWithValue("$limit",limit);
+        using var r=cmd.ExecuteReader();var list=new List<string>();while(r.Read())list.Add(r.GetString(0));return list;
+    }
+    public void RecordDialogueKeys(long careerId,long characterId,IEnumerable<string> keys)
+    {
+        using var db=Open();using var tx=db.BeginTransaction();var now=DateTime.UtcNow.ToString("O");
+        foreach(var key in keys.Where(x=>!string.IsNullOrWhiteSpace(x)))
+        {
+            using var cmd=db.CreateCommand();cmd.Transaction=tx;
+            cmd.CommandText="INSERT INTO dialogue_usage(career_id,character_id,phrase_key,used_at) VALUES($career,$character,$key,$now) ON CONFLICT(career_id,character_id,phrase_key) DO UPDATE SET used_at=excluded.used_at";
+            cmd.Parameters.AddWithValue("$career",careerId);cmd.Parameters.AddWithValue("$character",characterId);cmd.Parameters.AddWithValue("$key",key);cmd.Parameters.AddWithValue("$now",now);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+
+    /// <summary>
+    /// Folds the write-ahead log back into the database file. Run on shutdown so the single .db file is
+    /// self-contained for anyone who copies it by hand.
+    /// </summary>
+    public void Checkpoint()
+    {
+        try
+        {
+            using var db=Open();using var cmd=db.CreateCommand();
+            cmd.CommandText="PRAGMA wal_checkpoint(TRUNCATE)";cmd.ExecuteNonQuery();
+        }
+        catch(SqliteException){}
+    }
+
+    public void Backup(string destination){Directory.CreateDirectory(System.IO.Path.GetDirectoryName(destination)!);using var source=Open();using(var checkpoint=source.CreateCommand()){checkpoint.CommandText="PRAGMA wal_checkpoint(TRUNCATE)";checkpoint.ExecuteNonQuery();}using var target=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=destination}.ToString());target.Open();source.BackupDatabase(target);}
     public void Restore(string source)
     {
         using(var check=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=source,Mode=SqliteOpenMode.ReadOnly}.ToString())){check.Open();using var cmd=check.CreateCommand();cmd.CommandText="SELECT count(*) FROM schema_migrations";_ = cmd.ExecuteScalar() ?? throw new InvalidDataException("Not a Touchline backup.");}
+        SqliteConnection.ClearAllPools();
         File.Copy(source,Path,true);
+        // A leftover write-ahead log from the replaced database would be applied on top of the restored
+        // file and undo the restore, so both side-car files go with it.
+        foreach(var sidecar in new[]{Path+"-wal",Path+"-shm"})
+            if(File.Exists(sidecar))try{File.Delete(sidecar);}catch(IOException){}
+        Migrate();
     }
     private static void Exec(SqliteConnection db,SqliteTransaction tx,string sql,params(string,object)[] values){using var c=db.CreateCommand();c.Transaction=tx;c.CommandText=sql;foreach(var p in values)c.Parameters.AddWithValue(p.Item1,p.Item2);c.ExecuteNonQuery();}
 }

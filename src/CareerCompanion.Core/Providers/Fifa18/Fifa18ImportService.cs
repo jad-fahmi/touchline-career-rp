@@ -52,11 +52,15 @@ public sealed class Fifa18ImportService(Database db)
         }
         if(parsed.TransferRequest is { } request)worldUpdates+=new Services.AutomaticWorldService(db).ApplyTransferRequest(careerId,request,autoTeammates,autoManager);
         if(storedFixture is not null)worldUpdates+=new Services.AutomaticWorldService(db).ApplyPreMatch(careerId,storedFixture,parsed.OpponentScout,autoTeammates,autoManager);
+        // The whole world feed is worth keeping in the news screen, but only stories that actually involve
+        // the player or the club deserve an alert, and never more than a couple per scan.
         var worldNews=parsed.WorldNews??Array.Empty<Fifa18WorldNews>();
-        for(var index=0;index<worldNews.Count;index++)
-        {
-            var item=worldNews[index];db.AddProviderNews(careerId,item.EventKey,item.Title,string.IsNullOrWhiteSpace(item.Body)?item.Title:item.Body,item.Importance,item.Date,index<12);
-        }
+        var alerts=worldNews.Where(x=>x.AboutPlayer||x.AboutClub&&x.Importance>=55)
+            .OrderByDescending(x=>x.AboutPlayer).ThenByDescending(x=>x.Importance).ThenByDescending(x=>x.Date)
+            .Take(2).Select(x=>x.EventKey).ToHashSet(StringComparer.Ordinal);
+        foreach(var item in worldNews)
+            db.AddProviderNews(careerId,item.EventKey,item.Title,string.IsNullOrWhiteSpace(item.Body)?item.Title:item.Body,
+                item.Importance,item.Date,alerts.Contains(item.EventKey));
         var nationalKey=$"career:{careerId}:fifa_national_team_id";var previousNational=db.GetSetting(nationalKey);if(parsed.NationalTeamId>0&&previousNational!=parsed.NationalTeamId.ToString())
         {
             var team=string.IsNullOrWhiteSpace(parsed.NationalTeamName)?parsed.NationalityName:parsed.NationalTeamName;var timestamp=DateTime.TryParse(parsed.CurrentDate,out var date)?date:parsed.CapturedAt;var summary=$"Selected for international duty with {team}.";db.AddNotification(careerId,"International","International call-up",summary,"Timeline",90,$"national-callup:{parsed.FileFingerprint}:{parsed.NationalTeamId}",timestamp);db.SaveEvent(new(0,careerId,null,"NATIONAL_TEAM_CALLED_UP",timestamp,90,"[]",JsonSerializer.Serialize(new{parsed.NationalTeamId,TeamName=team,parsed.FileFingerprint}),summary,FactClassification.SaveFact));

@@ -14,6 +14,9 @@ public sealed class CareerService(Database db)
 
     public MatchProcessingResult ProcessMatch(long careerId, MatchInput input,string? provider=null,string? providerEventKey=null)
     {
+        // A club match carries no representing team of its own, so name the club rather than leaving a gap
+        // in every summary and headline built from it.
+        if(string.IsNullOrWhiteSpace(input.RepresentingTeam))input=input with{RepresentingTeam=db.GetCareer(careerId).Club};
         var prior = db.GetMatches(careerId);
         var matchId=!string.IsNullOrWhiteSpace(provider)&&!string.IsNullOrWhiteSpace(providerEventKey)?db.SaveProviderMatch(careerId,provider,providerEventKey,input).MatchId:db.SaveMatch(careerId,input);
         var match = db.GetMatch(careerId,matchId);prior=prior.Where(x=>x.Id!=matchId).ToList();
@@ -36,6 +39,7 @@ public sealed class CareerService(Database db)
 
     public MatchProcessingResult UpdateMatch(long careerId,long matchId,MatchInput input)
     {
+        if(string.IsNullOrWhiteSpace(input.RepresentingTeam))input=input with{RepresentingTeam=db.GetCareer(careerId).Club};
         _=db.GetMatch(careerId,matchId);db.ClearGeneratedMatchWorld(careerId,matchId);db.UpdateMatch(careerId,matchId,input);
         var match=db.GetMatch(careerId,matchId);var prior=db.GetMatches(careerId,500).Where(x=>x.Id!=matchId&&string.CompareOrdinal(x.Input.Date,match.Input.Date)<=0).ToList();
         var detected=_events.Detect(careerId,matchId,match.Input,prior).Select(e=>e with{Id=db.SaveEvent(e)}).ToList();
@@ -48,10 +52,15 @@ public sealed class CareerService(Database db)
     private IReadOnlyList<string> UpdateNarratives(long careerId,long matchId, IReadOnlyList<CareerEvent> events, IReadOnlyList<CareerMatch> matches)
     {
         var active = new List<string>();
+        var resolved = new List<string>();
+        var latest = matches.LastOrDefault();
         if (events.Any(e => e.Type == "WINNING_STREAK")) active.Add("STRONG_FORM");
         if (events.Any(e => e.Type == "LOSING_STREAK")) active.Add("POOR_FORM");
         if (matches.TakeLast(5).Sum(m => m.Input.Goals) >= 6) active.Add("BREAKOUT_SEASON");
         if (matches.TakeLast(4).Sum(m => m.Input.Goals) == 0) active.Add("GOAL_DROUGHT");
-        db.ApplyNarrativesOnce(careerId,matchId,active);return active;
+        else resolved.Add("GOAL_DROUGHT");
+        if (latest?.Result == "W") resolved.Add("POOR_FORM");
+        if (latest?.Result == "L") resolved.Add("STRONG_FORM");
+        db.ApplyNarrativesOnce(careerId,matchId,active,resolved.Except(active).ToList());return active;
     }
 }

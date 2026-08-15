@@ -36,10 +36,17 @@ internal static class Fifa18Metadata
                 ("JMld","artificialkey",0),("mCXg","teamid",-1),("Amxm","minsplayed",0),
                 ("MRaj","playeroverall",-1),("ykFq","playerid",-1),("BRof","playerfact",-1),
                 ("vjla","position",-1))),
+            // relatedteamid/secondaryteamid are not named in the public meta dumps. They were
+            // identified from real saves: on a match review or preview the article's own team is
+            // `teamid` and the other club is `relatedteamid`; on a transfer the two clubs are
+            // `relatedteamid` (buying) and `secondaryteamid` (selling). 0x7FFFF means "not set".
             ["ulAT"] = new("career_news", F(
                 ("Xdcs","newsid",0),("mCXg","teamid",-1),("AmzQ","title",0),
                 ("gKSa","importance",0),("ykFq","playerid",-1),("HBfc","date",20080101),
-                ("WrfA","body",0))),
+                ("WrfA","body",0),("GFSI","relatedteamid",0),("nLDP","secondaryteamid",0),
+                ("qDVF","templateid",0))),
+            // Full rivalry map. `teams.rivalteam` only exposes a single primary rival.
+            ["LbKk"] = new("rivals", F(("ytXF","rivaltype",0),("afAW","teamid",0),("fmFo","rivalteamid",0))),
             ["Knen"] = new("managers", F(
                 ("mCXg","teamid",1),("VHIB","managerid",1),("HdeP","firstname",0),("rREd","surname",0))),
             ["kISL"] = new("teamstadiumlinks", F(

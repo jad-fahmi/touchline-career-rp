@@ -1,6 +1,6 @@
 # Touchline - FIFA 18 AI Career Companion
 
-Touchline is a Windows desktop companion for FIFA 18 Player Career Mode. FIFA remains the authority for matches, statistics, transfers, tables, and selection; Touchline reads Player Career save files without modifying them, stages detected results for review, and builds a persistent world of teammates, managers, press, news, social reactions, relationships, memories, and emerging narratives around imported facts.
+Touchline is a Windows desktop companion for FIFA 18 Player Career Mode. FIFA remains the authority for matches, statistics, transfers, tables, and selection; Touchline reads Player Career save files without modifying them, imports what they prove without asking, and builds a persistent world of teammates, managers, press, news, social reactions, relationships, memories, and emerging narratives around imported facts.
 
 ## Screenshots
 
@@ -29,7 +29,7 @@ The app owns facts, state, chronology, relationships, memory, bounds, and event 
 - First-run fictional demonstration career and manual career creation
 - Read-only FIFA 18 Player Career save discovery, including OneDrive-redirected Documents folders
 - Startup synchronization and a self-healing save-folder watcher with career routing by FIFA player ID
-- Persistent match-review inbox, career linking, dismissal history, chronological safety checks, and idempotent provider match storage
+- Hands-off match import with a review inbox only for genuinely ambiguous results, career linking, dismissal history, chronological safety checks, and idempotent provider match storage
 - Automatic teammate reconciliation by stable FIFA player ID, with transfers and departures preserved in character history
 - Automatic verified manager and agent creation, replacement reconciliation, FIFA Wire news import, international call-up and appearance detection, progression snapshots, and club or country fixture detection
 - Quick squad/manager/journalist entry; structured profile editing and JSON import/export
@@ -39,11 +39,11 @@ The app owns facts, state, chronology, relationships, memory, bounds, and event 
 - Importance heuristics, selective reaction targeting, silence for minor events, and narrative emergence/decay
 - Multi-dimensional bounded relationships and validated model deltas
 - Per-character memory persistence, relevance ranking, and conservative compression architecture
-- Automatic incoming teammate and manager reactions, stateful characters, an unread World Updates inbox, and sender-aware navigation
+- Automatic incoming teammate and manager reactions chosen by who has a reason to speak, with praise, criticism, humour, support, or indifference following the result and the relationship
 - Numeric red unread badges for World Updates and Messages, with automatic sender selection when opening a message notification
 - Persistent player confidence, pressure, fatigue, isolation, and resilience, with context-sensitive emotional impact after defeats
 - Relationship-aware private support after severe losses, plus player-controlled recovery, training, and opening-up responses
-- Persistent automatic-generation jobs that show an immediate offline fallback and rewrite it with character-aware LLM dialogue when an API key is available
+- Offline dialogue composed from match facts, personality, relationship, form, and storylines, with anti-repetition across a long career, so characters stay themselves with or without a model
 - Scene-aware messages, manager and agent conversations, conditional multi-question post-match interviews with grounded AI follow-ups and offline fallback, and consequential public statements
 - Statement-aware manager and teammate follow-ups for accountable, team-first, boastful, critical, or referee-focused interview answers
 - Automatic pre-match manager briefings and teammate messages, with opposition key players, manager, venue, and rivalry context read from the FIFA save when available
@@ -76,7 +76,9 @@ Open **Career** and use the **Automatic FIFA 18 Sync** card. Touchline discovers
 
 On the first scan, Touchline stages the detected FIFA save as a pending link. During automatic startup or watcher scans, it creates and links the companion career automatically when the fictional demo is the only local career. During a manual scan, it asks before linking. The link includes the FIFA player, club, season, position, shirt number, current career date, teammates, verified club manager, named agent, FIFA news, progression baseline, and the next confirmed fixture.
 
-A detected result is stored in the match-review inbox and survives restarts. The first result and every ambiguous result stay editable because cumulative statistics or unsupported fields may be uncertain. Once Touchline has a chronological baseline, a result is imported automatically only when the save proves exactly one new appearance and a matching FIFA review proves the opponent and score. Dismissed detections are remembered. Provider-linked match storage, events, reactions, and media are deduplicated so a retry cannot create another match.
+Matches import on their own. Touchline reads FIFA's player match-rating history as a complete appearance log, so it knows the exact date, minutes, match rating, and whether the player started or came off the bench for every club match, along with the whole matchday squad's ratings. The opponent comes from the team identifier FIFA attaches to its own match articles rather than from reading club names out of a headline, and the local rivalry map marks derbies. Everything the save proves is imported without asking, including several matches at once when the player has been away from Touchline, always oldest first.
+
+Review is reserved for what FIFA genuinely leaves ambiguous. Because the save only stores season totals, per-match goals and assists can be attributed only when exactly one new appearance has happened since the last import; when two arrive together, or on the very first link of a career that is already under way, the match is staged with everything else prefilled and the season totals quoted so it takes seconds to finish. A scoreline FIFA has not published yet does not block the import: the match joins the career immediately and Touchline fills the score in by itself once a later save publishes it. Articles seen during a scan are remembered, so a report that scrolls out of FIFA's rolling news feed can still identify a match later. Dismissed detections are remembered. Provider-linked match storage, events, reactions, and media are deduplicated so a retry, a restart, or an interrupted batch cannot create another match.
 
 International duty is tracked separately from club football. Touchline reads the selected national team and FIFA's player-specific country news, identifies international appearances and opponents, preserves the representing team on matches and fixtures, and records debuts, later caps, international goals, assists, interviews, and emotional impact. FIFA 18 does not add these appearances to the validated club rating/history tables. When FIFA confirms an international appearance and outcome but omits the exact score or performance fields, Touchline stages a prefilled review and requires the score before import instead of inventing it. Any known minutes, rating, goals, assists, cards, venue, and starter status can be completed in the same review.
 
@@ -109,6 +111,8 @@ OpenAI is used for models such as `gpt-5.4`. Claude is selected automatically wh
 Ollama is the completely local, no-key option. Install Ollama, run `ollama pull qwen2.5:7b`, then enter `ollama:qwen2.5:7b` as both model settings and save without an API key. The app calls Ollama at `http://localhost:11434/api`.
 
 Models prefixed with `compatible:` use the configurable OpenAI-compatible Chat Completions endpoint. Set the endpoint in Settings, for example `https://openrouter.ai/api/v1` or `http://localhost:1234/v1`, select a compatible model, and paste the relevant key if the endpoint needs one. This supports OpenRouter, LM Studio, KoboldCpp, Groq, Together, LiteLLM, and similar gateways.
+
+Direct messages to a character go to the model unless the message is a bare greeting such as "hey" or "morning mate", which the offline library answers instantly. A greeting that carries a second line, a question, or anything else is a real message and is answered by the model. When a model reply comes back wrapped in JSON, cut short, prefixed with a speaker label, or written from outside the football world, the request is repeated with a targeted correction before the offline library is used, so formatting problems no longer cost a real reply.
 
 If no provider is available, the offline dialogue library remains active. It covers direct conversations, selection and benching, training, injuries, transfers, international duty, wins, defeats, draws, cards, penalties, records, pre-match briefings, squad arrivals, wellbeing check-ins, press statements, and post-match interviews. Its combinatorial direct-message generator produces over 100,000 deterministic grounded variants from reusable dialogue components, so the repository does not need 100,000 copied paragraphs. Responses are selected from character-aware, scene-aware variants and stored normally in the career history.
 
@@ -177,8 +181,9 @@ Enable Developer/debug mode in Settings. The hidden Debug navigation then shows 
 
 - The save parser currently targets Player Career. It imports identity, club, season and date, position and number, reliable career overall, cumulative club statistics, teammates, manager, agent, FIFA news, national-team selection, and the latest club or country match and preview evidence. Tables and trophy state still require manual entry.
 - Only fixtures confirmed by a FIFA-generated preview are synchronized. The tested save contains no populated full-season `fixtures` table.
-- A first detected appearance is imported automatically when the save proves a single appearance and rating-history update. Review is reserved for ambiguous snapshots, multiple unimported appearances, out-of-order saves, or corrections where exact result details are needed. Cumulative stat deltas are anchored to every imported provider snapshot, including season-opening counter resets.
-- Starter status, penalties, derby classification, suspensions, and the career player's exact injury state are not reliably exposed by the currently validated tables. Some saves also omit the opponent and scoreline. Touchline records those fields as unknown instead of inventing them, while still importing the proven appearance and performance facts; an exact score can be supplied later through correction if required.
+- Appearances, minutes, match ratings, starter or substitute status, the matchday squad, and derby classification are all read from the save and need no input. Per-match goals and assists are the one statistic FIFA never stores, so they are derived from the change in season totals and are only trusted when exactly one new appearance has happened since the last import.
+- Review therefore remains for two cases: two or more appearances arriving in the same scan, and the first link of a career that has already played more than one match. Both stage a prefilled match that quotes FIFA's season totals.
+- Penalties, suspensions, and the career player's exact injury state are not reliably exposed by the currently validated tables. A venue that no report names and a scoreline FIFA has not published yet are recorded as unknown rather than guessed; the score is filled in automatically when a later save publishes it.
 - FIFA 18 save structures are undocumented and can vary with platform, title update, mode, or mod. Unknown or malformed layouts fail closed and are not modified.
 - Generated AI dialogue requires the user's OpenAI account, model access, and network connection. No live-key request is made by the test suite.
 - News and social generation has a deterministic offline fallback; the current UI does not expose advanced pricing-table editing or a visual generation-job queue monitor.
@@ -192,7 +197,7 @@ It does not attach to `FIFA18.exe`, inject code, automate gameplay, write game d
 
 ## Roadmap
 
-- **Current:** automatic FIFA 18 synchronization, safe club and international match import, country-specific career records, editable manual history, opponent scouting, transfer and squad-change stories, proactive briefings, consequential interviews, media, and progression tracking
+- **Current:** hands-off FIFA 18 synchronization and match import, squad match reports, country-specific career records, editable manual history, opponent scouting, transfer and squad-change stories, proactive briefings, consequential interviews, media, and progression tracking
 - **Next:** verified awards, trophy changes, richer competition context, and longer-running narrative arcs
 - **Later:** additional save-format validation across leagues, seasons, mods, and title updates
 

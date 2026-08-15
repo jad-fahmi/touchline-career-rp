@@ -1,7 +1,76 @@
-<Window x:Class="CareerCompanion.App.ProfileEditorWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Character Profile Editor" Width="800" Height="700" WindowStartupLocation="CenterOwner">
-  <Grid Margin="24"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <StackPanel><TextBlock x:Name="NameText" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Historical truth, save fiction, and simulated interpretation remain separate." Foreground="{StaticResource Muted}" Margin="0,5,0,16"/></StackPanel>
-    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock Text="Hard facts (JSON)" Style="{StaticResource Label}"/><TextBox x:Name="FactsBox" AcceptsReturn="True" MinHeight="90" FontFamily="Consolas"/><TextBlock Text="Public personality (JSON)" Style="{StaticResource Label}"/><TextBox x:Name="PersonalityBox" AcceptsReturn="True" MinHeight="180" FontFamily="Consolas"/><TextBlock Text="Communication style (JSON)" Style="{StaticResource Label}"/><TextBox x:Name="CommunicationBox" AcceptsReturn="True" MinHeight="130" FontFamily="Consolas"/><TextBlock Text="Historical notes (real-world context only)" Style="{StaticResource Label}"/><TextBox x:Name="HistoricalBox" AcceptsReturn="True" MinHeight="90"/><CheckBox x:Name="PublicBox" Content="Public/media character"/></StackPanel></ScrollViewer>
-    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="IMPORT JSON" Click="Import_Click" Style="{StaticResource SecondaryButton}"/><Button Content="EXPORT JSON" Click="Export_Click" Style="{StaticResource SecondaryButton}"/><Button Content="SAVE PROFILE" Click="Accept_Click"/></StackPanel>
+<Window x:Class="CareerCompanion.App.ProfileEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:CareerCompanion.App"
+        Title="Character profile" Width="860" Height="760" MinWidth="620" MinHeight="520"
+        WindowStartupLocation="CenterOwner" UseLayoutRounding="True" Style="{StaticResource AppWindow}">
+  <Grid Margin="26,22,26,20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <StackPanel Margin="0,0,0,16">
+      <TextBlock x:Name="NameText" Style="{StaticResource Heading}"/>
+      <TextBlock Text="Historical truth, save fiction, and simulated interpretation stay separate. Nothing written here can change a match FIFA already recorded."
+                 Style="{StaticResource Subheading}" Margin="0,0,0,0"/>
+      <Border Height="3" Width="90" CornerRadius="2" Background="{StaticResource BrandRule}"
+              HorizontalAlignment="Left" Margin="0,12,0,0"/>
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,10,0">
+      <StackPanel>
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock Text="HARD FACTS" Style="{StaticResource Label}"/>
+            <TextBlock Text="What the save proves about this character. JSON." Style="{StaticResource Caption}" Margin="0,0,0,8"/>
+            <TextBox x:Name="FactsBox" Style="{StaticResource CodeBox}" MinHeight="110"
+                     app:Hint.Text="{}{ }"/>
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock Text="PUBLIC PERSONALITY" Style="{StaticResource Label}"/>
+            <TextBlock Text="Temperament, values, and how this character behaves under pressure. JSON."
+                       Style="{StaticResource Caption}" Margin="0,0,0,8"/>
+            <TextBox x:Name="PersonalityBox" Style="{StaticResource CodeBox}" MinHeight="200"/>
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock Text="COMMUNICATION STYLE" Style="{StaticResource Label}"/>
+            <TextBlock Text="Register, warmth, verbosity, and the habits that make them sound like themselves. JSON."
+                       Style="{StaticResource Caption}" Margin="0,0,0,8"/>
+            <TextBox x:Name="CommunicationBox" Style="{StaticResource CodeBox}" MinHeight="150"/>
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock Text="HISTORICAL NOTES" Style="{StaticResource Label}"/>
+            <TextBlock Text="Real-world context only. Free text." Style="{StaticResource Caption}" Margin="0,0,0,8"/>
+            <TextBox x:Name="HistoricalBox" Style="{StaticResource Editor}" MinHeight="100"/>
+            <CheckBox x:Name="PublicBox" Content="Public or media character" Style="{StaticResource ToggleSwitch}"
+                      Margin="0,6,0,0"/>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+
+    <Grid Grid.Row="2" Margin="0,16,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <StackPanel Orientation="Horizontal">
+        <Button Content="IMPORT JSON" Click="Import_Click" Style="{StaticResource GhostButton}"/>
+        <Button Content="EXPORT JSON" Click="Export_Click" Style="{StaticResource GhostButton}"/>
+      </StackPanel>
+      <Button Grid.Column="2" Content="SAVE PROFILE" Click="Accept_Click" MinWidth="150" Margin="0"/>
+    </Grid>
   </Grid>
 </Window>

@@ -16,7 +16,7 @@ public sealed class EventEngine
         var result = match.ScoreKnown ? match.TeamScore.CompareTo(match.OpponentScore) : 0;
         Add(match.ScoreKnown ? result > 0 ? "MATCH_WON" : result < 0 ? "MATCH_LOST" : "MATCH_DRAWN" : "MATCH_RECORDED",
             BaseImportance(match), match.ScoreKnown
-                ? $"{match.Competition}: {match.RepresentingTeam} {(match.IsHome ? "vs" : "at")} {match.Opponent}, {match.ScoreLabel}."
+                ? $"{match.Competition}: {match.RepresentingTeam} {match.VenueLabel} {match.Opponent}, {match.ScoreLabel}."
                 : $"{match.Competition}: recorded an appearance for {match.RepresentingTeam} against {match.Opponent}.");
         if(match.TeamContext=="International")
         {
@@ -35,7 +35,8 @@ public sealed class EventEngine
         if (match.PenaltyMissed) Add("PLAYER_MISSED_PENALTY", 55, "Missed a penalty.");
         if (match.IsDerby) Add("RIVAL_MATCH", 30 + BaseImportance(match), $"Played a rivalry match against {match.Opponent}.");
         if (match.ScoreKnown&&result < 0 && match.OpponentScore - match.TeamScore >= 3) Add("LARGE_DEFEAT", 78, "Suffered a heavy defeat.");
-        if (match.ScoreKnown&&result > 0 && match.Notes.Contains("late", StringComparison.OrdinalIgnoreCase)) Add("LATE_WINNER", 85, "Won with a late goal.");
+        // Only an explicit note counts. Provider evidence text can contain the word "late" by coincidence.
+        if (match.ScoreKnown && result > 0 && (match.Notes.Contains("late winner", StringComparison.OrdinalIgnoreCase) || match.Notes.Contains("late goal", StringComparison.OrdinalIgnoreCase))) Add("LATE_WINNER", 85, "Won with a late goal.");
 
         var currentOutcome=match.ScoreKnown?(result > 0 ? "W" : result < 0 ? "L" : "D"):"U";
         var outcomes = previousMatches.TakeLast(4).Select(x => x.Result).Append(currentOutcome).ToArray();

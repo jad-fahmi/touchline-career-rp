@@ -52,9 +52,13 @@ public sealed class PlayerPsychologyService(Database db)
 
     private int CreatePrivateSupport(CareerMatch match,PlayerState state,int severity,long eventId,bool teammates,bool managers)
     {
-        var supporters=SelectSupporters(match.CareerId,teammates,managers);var count=severity>=22?Math.Min(2,supporters.Count):Math.Min(1,supporters.Count);var created=0;foreach(var person in supporters.Take(count))
+        var supporters=SelectSupporters(match.CareerId,teammates,managers);var count=severity>=22?Math.Min(2,supporters.Count):Math.Min(1,supporters.Count);var created=0;
+        // Two people checking in on the same evening must not send the same words, so they share one set of
+        // spoken lines and each starts from a different place in the pool.
+        var spoken=new HashSet<string>(StringComparer.Ordinal);
+        foreach(var person in supporters.Take(count))
         {
-            var text=OfflineDialogueLibrary.Support(person,severity,match.Input.Opponent,eventId.GetHashCode());var context=JsonSerializer.Serialize(new{automatic=true,eventId,privateSupport=true,playerMood=state.Mood});if(db.AddAutomaticReaction(match.CareerId,person.Id,eventId,SceneType.PrivateMessage,context,text,72,severity>=22?45:30,"private wellbeing check-in",person.Type==CharacterType.Manager?"Manager":"Message",person.Name,$"Messages:{person.Id}",Math.Clamp(65+severity,65,95),$"wellbeing-support:{match.Id}:{person.Id}",state.UpdatedAt))created++;
+            var text=OfflineDialogueLibrary.Support(person,severity,match.Input.Opponent,Seed(eventId,person.Id),spoken);var context=JsonSerializer.Serialize(new{automatic=true,eventId,privateSupport=true,playerMood=state.Mood});if(db.AddAutomaticReaction(match.CareerId,person.Id,eventId,SceneType.PrivateMessage,context,text,72,severity>=22?45:30,"private wellbeing check-in",person.Type==CharacterType.Manager?"Manager":"Message",person.Name,$"Messages:{person.Id}",Math.Clamp(65+severity,65,95),$"wellbeing-support:{match.Id}:{person.Id}",state.UpdatedAt))created++;
         }
         return created;
     }
@@ -63,16 +67,9 @@ public sealed class PlayerPsychologyService(Database db)
     {
         var active=db.GetCharacters(careerId).Where(IsActive).Where(x=>x.Type==CharacterType.Agent||x.Type==CharacterType.Teammate&&teammates||x.Type==CharacterType.Manager&&managers).ToList();return active.OrderByDescending(x=>SupportScore(x,db.GetRelationship(x.Id))).ThenBy(x=>x.Id).ToList();
     }
+    /// <summary>Mixes the event with the speaker so two supporters do not start from the same line.</summary>
+    private static int Seed(long eventId,long characterId){unchecked{var hash=(int)(eventId*397)^(int)(characterId*31)^(int)(characterId>>32);return hash&int.MaxValue;}}
     private static int SupportScore(Character person,Relationship relationship)=>relationship.Trust*2+relationship.Familiarity+relationship.Friendliness+relationship.Score+(person.Type==CharacterType.Agent?35:person.Type==CharacterType.Teammate?20:5);
-    private static string SupportText(Character person,int severity,string opponent)=>person.Type switch
-    {
-        CharacterType.Agent when severity>=22=>$"I heard how badly the result against {opponent} hit you. Do not sit with this alone tonight. I am calling now, and I can come over if you need me.",
-        CharacterType.Agent=>$"Forget the noise around the result for a moment. Call me when you are somewhere quiet. You do not have to carry it by yourself.",
-        CharacterType.Manager when severity>=22=>"Football can wait tonight. Speak to someone you trust, get away from the noise, and check in with me tomorrow.",
-        CharacterType.Manager=>"I know this result hurts. Take tonight, clear your head, and we will talk properly tomorrow.",
-        _ when severity>=22=>"I know this one has hit you hard. You do not need to find the right words. I can come over, or we can just sit for a while.",
-        _=>"That result is still hurting, I know. If you want company or just someone to listen, call me."
-    };
     private static PlayerState ApplyChoice(PlayerState current,string choice,string dateText)
     {
         var date=DateTime.TryParse(dateText,out var parsed)?parsed:DateTime.UtcNow;var state=choice switch{"open_up"=>current with{Confidence=Math.Clamp(current.Confidence+3,0,100),Pressure=Math.Clamp(current.Pressure-8,0,100),Isolation=Math.Clamp(current.Isolation-20,0,100),Resilience=Math.Clamp(current.Resilience+2,0,100),LastTrigger="Opened up to the inner circle",UpdatedAt=date},"recover"=>current with{Pressure=Math.Clamp(current.Pressure-10,0,100),Fatigue=Math.Clamp(current.Fatigue-25,0,100),Isolation=Math.Clamp(current.Isolation-3,0,100),LastTrigger="Took time away to recover",UpdatedAt=date},_=>current with{Confidence=Math.Clamp(current.Confidence+8,0,100),Pressure=Math.Clamp(current.Pressure-4,0,100),Fatigue=Math.Clamp(current.Fatigue+7,0,100),Resilience=Math.Clamp(current.Resilience+2,0,100),LastTrigger="Reset through focused training",UpdatedAt=date}};return state with{Mood=Mood("",state.Confidence,state.Pressure,state.Fatigue,state.Isolation,false),NeedsSupport=state.Pressure>=68||state.Isolation>=45||state.Confidence<=30};

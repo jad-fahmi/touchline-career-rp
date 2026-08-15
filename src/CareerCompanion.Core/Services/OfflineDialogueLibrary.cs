@@ -9,26 +9,39 @@ namespace CareerCompanion.Core.Services;
 public static class OfflineDialogueLibrary
 {
     /// <summary>
-    /// Returns true when a player message needs an open-ended model response.
-    /// Offline dialogue deliberately handles statements, greetings, short pings,
-    /// and football topics for which the library has grounded intent-specific text.
-    /// The model is reserved for genuinely open questions, such as opinions about
-    /// another player, that cannot be answered from the local career context.
+    /// Returns true when a player message needs a model response, which is nearly always. The only thing
+    /// the offline library answers by choice is a bare greeting ("hey", "morning mate"): there is one
+    /// natural reply to that and it costs nothing. The moment a greeting carries anything else, or the
+    /// message is not a greeting at all, the player is saying something real and deserves a real answer.
+    /// Everything else in this library exists for when the model cannot be reached.
     /// </summary>
-    public static bool RequiresAi(string message)
+    public static bool RequiresAi(string message)=>!IsBareGreeting(message);
+
+    /// <summary>
+    /// True for a greeting on its own. A trailing name or "mate" is still a bare greeting; a second
+    /// clause, a question, or any word the greeting does not account for is not.
+    /// </summary>
+    public static bool IsBareGreeting(string message)
     {
         var text=message.Trim();
-        if(text.Length==0)return false;
-        var lower=text.ToLowerInvariant();
-        var intent=Intent(lower);
-        var asksQuestion=lower.Contains('?')||new[]{"what ","why ","how ","who ","when ","where ","which ","should ","could ","would ","can ","do ","does ","is ","are ","will "}.Any(lower.StartsWith);
-        if(!asksQuestion&&intent is not "general")return false;
-        // A question is not the only kind of message that can need context.
-        // Longer, unrecognised statements (opinions, tactical observations,
-        // criticism, jokes, and references to another player) also go to the
-        // model. Only grounded intents and short social pings stay offline.
-        return intent is "question" || intent is "general" && text.Length>12;
+        if(text.Length==0)return true;
+        if(text.Contains('?'))return false;
+        // Two sentences means the greeting was only the opening of a real message.
+        if(text.TrimEnd('.','!',' ').IndexOfAny(['.','!','\n'])>=0)return false;
+        var words=text.ToLowerInvariant().Split([' ','\t',',','.','!','-'],StringSplitOptions.RemoveEmptyEntries);
+        if(words.Length==0||words.Length>3)return false;
+        if(!GreetingWords.Contains(words[0]))return false;
+        // "hey Marco" is still just a greeting, so a single trailing word is allowed whatever it is.
+        // A third word has to belong to the greeting itself: "good morning mate" stays offline,
+        // "hey boss, quick one" does not.
+        if(words.Length<=2)return words.All(word=>word.All(char.IsLetter));
+        return words.Skip(1).All(word=>GreetingWords.Contains(word)||GreetingCompanions.Contains(word));
     }
+
+    private static readonly HashSet<string> GreetingWords=new(StringComparer.OrdinalIgnoreCase)
+        {"hi","hey","hello","yo","morning","afternoon","evening","good","hiya","alright","aight","ey","oi","sup","heya","hola","ciao","salam"};
+    private static readonly HashSet<string> GreetingCompanions=new(StringComparer.OrdinalIgnoreCase)
+        {"mate","boss","gaffer","coach","man","bro","brother","lad","there","again","you","all","everyone","pal","bud","buddy","sir","skip","skipper"};
 
     public static GenerationResult Direct(Character character,Career career,Relationship relationship,CharacterState state,PlayerState player,string message,SceneType scene)
     {
@@ -82,42 +95,7 @@ public static class OfflineDialogueLibrary
     };
     private static readonly string[] NaturalClosers={"You good?","Text me later.","I am around.","Do not disappear, yeah?","We will talk."};
 
-    public static string MatchReaction(Character character,Career career,CareerMatch match,CareerEvent evt)
-    {
-        var input=match.Input;var p=character.Profile.Personality;var c=character.Profile.Communication;var playful=p.Humor>=58||c.Humor>=58;var direct=p.Diplomacy<45||c.Directness>=74;var seed=Seed(character.Id.ToString(),career.CurrentDate,evt.Id.ToString(),evt.Type);
-        if(!input.ScoreKnown)return character.Type==CharacterType.Manager
-            ?Pick(new[]{"I could not see the final scoreline, but I have your minutes and performance. Tell me how you felt the match went and we will review the detail when it is available.","The result is not clear yet. I want your honest read on the performance before we fill in the rest of the report."},seed)
-            :Pick(new[]{"I saw your minutes and performance, but the scoreline has not come through yet. How did it feel from the pitch?","The match detail is incomplete, but your appearance is logged. Tell me what you thought of your game."},seed);
-        if(character.Type==CharacterType.Manager)
-        {
-            if(input.TeamContext=="International")return input.TeamScore>input.OpponentScore?Pick(new[]{$"Good work with {input.RepresentingTeam}. Recover properly, then return ready for club duty.","That is a useful result for {input.RepresentingTeam}. Enjoy it, then turn your attention back to the club.","You represented {input.RepresentingTeam} well. Manage your recovery because the club schedule will not wait."},seed):Pick(new[]{$"International defeats hurt. Reset tonight and bring your focus back to the club.","A difficult night for {input.RepresentingTeam}. Learn from it, recover, and return ready.","That result will sting, but international duty is part of your growth. We will discuss it when you are back."},seed);
-            return evt.Type switch
-            {
-                "PLAYER_RED_CARD"=>Pick(direct?new[]{"The sending-off put the team in trouble. I need better discipline from you.","You cannot help us from the tunnel. We will discuss the decision, but we must start with your responsibility.","That was avoidable. Make sure one mistake does not become a pattern."}:new[]{"We will review the sending-off together. Your response now matters more than the mistake.","The red card changed the match. Come in tomorrow and we will work through what happened.","I know the moment got away from you. Show me maturity in how you respond."},seed),
-                "PLAYER_HATTRICK"=>Pick(p.Professionalism>=70?new[]{"Excellent finishing. Enjoy the achievement, then set the standard again in training.","Three goals is a serious contribution. The challenge is making this level normal for you.","That was clinical. Recover properly and keep the hunger that produced it."}:new[]{"Three goals is a fine way to make your case. Now show me you can repeat it.","You took your chances well today. Now we see how you handle the attention.","A special afternoon. Do not let praise replace the work that got you here."},seed),
-                "PLAYER_BRACE"=>Pick(new[]{"Two goals and a disciplined performance. That is the level we need from you.","You changed the match with your finishing. Keep asking for that responsibility.","A strong contribution today. The next step is to repeat it when the game is less comfortable."},seed),
-                "LARGE_DEFEAT"=>Pick(direct?new[]{"That result was below our standard. We work tomorrow and respond next match.","We were second best and there is no point hiding from it. The response starts in training.","That performance was not acceptable. I expect character from the group now."}:new[]{"That result is difficult to accept. We will find the response together.","The scoreline does not tell the whole story, but it tells us enough. We need to improve quickly.","A hard defeat, but we have a chance to answer it. Stay together and stay honest."},seed),
-                "PLAYER_BENCHED"=>Pick(p.Patience>=60?new[]{"Keep working. Your opportunity will come if your training stays at the right level.","Selection is a moving conversation. Make your daily work impossible to ignore.","Stay ready. Matches are often changed by the players who prepare properly on the bench."}:new[]{"You made an impact from the bench. Make selection impossible to ignore next time.","I need more urgency from you in training if you want to start the next one.","Use the disappointment. Turn it into better work this week."},seed),
-                "PENALTY_MISSED"=>Pick(new[]{"Missing hurts, but the next penalty is not decided by this one. Keep taking responsibility.","We will review the moment, then we move on. I trust players who are willing to take the ball.","You cannot change the miss. You can decide how you train tomorrow."},seed),
-                "PLAYER_INJURED"=>Pick(new[]{"Your recovery comes first. We will not rush you back for one match.","Stay patient with the medical plan and keep communicating with the staff.","Football will still be here when you are ready. Focus on the steps in front of you."},seed),
-                _=>input.TeamScore>input.OpponentScore?Pick(playful?new[]{"Good result. Enjoy it briefly, then we move on to the next job.","A useful win. Celebrate with the group, then recover properly.","Three points and a clean response. Now we protect the momentum."}:new[]{"Good result. Stay focused because the next match arrives quickly.","A professional result. Take the confidence into the next session.","That is the standard we need. Recover and prepare for the next challenge."},seed):input.TeamScore<input.OpponentScore?Pick(direct?new[]{"Review that performance honestly. We need a stronger response next time.","We did not do enough. Be ready for a demanding training session.","The result is on all of us, but each player must own their part."}:new[]{"We need to learn from that performance and prepare a stronger response.","It was a difficult result. We will look at the details without losing perspective.","We will regroup. Keep your head up and stay connected to the group."},seed):Pick(new[]{"A point, but there was more available to us today.","The draw keeps us moving, though we need to be sharper in the important moments.","Not the result we wanted, but there are useful lessons in the performance."},seed)
-            };
-        }
-        if(input.TeamContext=="International")return input.TeamScore>input.OpponentScore?Pick(new[]{$"That win with {input.RepresentingTeam} means a lot. Enjoy the night.","You will remember that result for a long time. Well done with {input.RepresentingTeam}.","A big night for you and {input.RepresentingTeam}. Make sure you enjoy it before the next job."},seed):Pick(new[]{$"Tough result with {input.RepresentingTeam}. We will pick you up when you get back.","That one will hurt, but you gave everything for {input.RepresentingTeam}. Keep your head up.","International defeats feel different. Talk to the lads when you are ready, then come home focused."},seed);
-        return evt.Type switch
-        {
-            "PLAYER_HATTRICK"=>Pick(playful?new[]{$"Unreal, {career.PlayerName}. You were unplayable. Save one for me next time.","Three goals? Leave some records for the rest of us.","I was going to congratulate you, but I am still trying to catch my breath."}:new[]{"That was a top-class finishing display. You earned every bit of it.","You took every chance with real conviction. That is a performance to remember.","A brilliant afternoon. The movement, timing, and finishing were all there."},seed),
-            "PLAYER_BRACE"=>Pick(new[]{"Two goals and you still did the work without the ball. That was a proper performance.","You made the difference today. Keep that confidence for the next one.","A brace is nice, but the way you stayed involved was even better."},seed),
-            "PLAYER_RED_CARD"=>Pick(direct?new[]{"That red card left us chasing the game. We need you on the pitch.","You let the moment beat you. We need a calmer version of you next time.","The team needed you and lost you. Own it, then make amends."}:new[]{"Forget the noise around the sending-off. We need you back with us.","That was a hard moment. We know you are better than one decision.","Do not disappear after the mistake. Come back into the group."},seed),
-            "PENALTY_MISSED"=>Pick(new[]{"It happens. The brave part was taking it in the first place.","That miss will replay in your head, but it does not erase the rest of your game.","Next time you take the ball again. That is how you answer it."},seed),
-            "PLAYER_INJURED"=>Pick(new[]{"Forget the match for now. Get yourself right and we will see you when you are ready.","That looked painful. Message me after the medical check, yeah?","No pressure to reply. Just focus on recovering properly."},seed),
-            "LARGE_DEFEAT"=>Pick(p.Loyalty>=65?new[]{"Tough one. We stay together and put it right next match.","Nobody is walking away from this group. We answer it together.","That hurt, but I know the lads will show up for the response."}:new[]{"That hurt. We cannot hide from it, but we can answer on the pitch.","We were miles off it today. We owe the supporters a reaction.","Do not pretend it was fine. Then do not let it become the next match too."},seed),
-            "LATE_WINNER"=>Pick(playful?new[]{"I still cannot believe that finish. The dressing room nearly lost its roof.","You waited until the last possible second to make us all panic.","That finish was ridiculous. I am claiming I called it before you shot."}:new[]{"That finish changed everything. What a moment.","You showed nerve when the match was slipping away. Brilliant timing.","The late winner says a lot about your belief. Hold on to that feeling."},seed),
-            _=>input.TeamScore>input.OpponentScore?Pick(playful?new[]{"Big result. I am claiming an assist for the celebration.","Three points, no complaints. Food is on you if you keep scoring.","That was fun. Let us make a habit of winning without the drama next time."}:new[]{"Big result today. You were important to it.","A proper team performance and a valuable win.","Good work today. Recover well and keep the confidence moving."},seed):input.TeamScore<input.OpponentScore?Pick(p.Openness>=55?new[]{"That one hurts. Talk to me if you need to clear your head.","I know you are disappointed. Come around later if you do not want to be alone.","It was a bad day, not the end of the story. Stay close to the group."}:new[]{"We have to respond. No hiding from this one.","We were not good enough. We need to be better next time.","That is football, but it still hurts. We go again."},seed):Pick(new[]{"A point. Feels like we left something out there.","Not a defeat, not enough of a win. We can be honest about both.","The draw keeps us moving, but I think we had more in us today."},seed)
-        };
-    }
-
-    public static string PreMatch(Character character,CareerFixture fixture,bool rival,string? keyThreat,int seed,string availability="Unknown")
+    public static string PreMatch(Character character,CareerFixture fixture,bool rival,string? keyThreat,int seed,string availability="Unknown",ISet<string>? spoken=null)
     {
         var p=character.Profile.Personality;var c=character.Profile.Communication;var opponent=fixture.Opponent;var venue=fixture.IsHome?"at home":$"away at {opponent}";
         if(availability is "Injured" or "Suspended" or "NotSelected" or "Unavailable")
@@ -126,63 +104,63 @@ public static class OfflineDialogueLibrary
                 ?new[]{$"You are not available for {opponent} while the injury is assessed. Focus on the recovery plan and stay close to the group.",$"The match against {opponent} will go on without you. No pressure to perform from the stands; get the medical work right."}
                 :availability=="Suspended"?new[]{$"You are unavailable for {opponent} through suspension. Stay involved, learn from the match, and be ready when the ban is served.",$"You cannot play against {opponent}. Keep your focus on the team and use the time out to reset."}
                 :new[]{$"You are not in the match selection for {opponent}. Keep training, support the group, and make the next decision harder.",$"You will not be on the pitch against {opponent}. I know that stings, but your response starts at the next session."},seed);
-            return Pick(new[]{$"Looks like you are not with us on the pitch against {opponent}. We will keep you close to the group.",$"The {opponent} match is not yours to play today. Stay around the lads and look after yourself."},seed);
+            return Pick(new[]{$"Looks like you are not with us on the pitch against {opponent}. We will keep you close to the group.",$"The {opponent} match is not yours to play today. Stay around the lads and look after yourself."},seed,spoken);
         }
         if(availability=="Benched")
         {
-            if(character.Type==CharacterType.Manager)return Pick(new[]{$"You are listed among the substitutes for {opponent}. Stay ready, but do not treat an appearance as guaranteed.",$"You are on the bench against {opponent}. Watch the game, stay warm, and be ready if the match needs you."},seed);
-            return Pick(new[]{$"You are on the bench for {opponent}. Keep your head in the game and be ready if your moment comes.",$"Not starting today, but the match can change quickly. Stay with the group and stay ready."},seed);
+            if(character.Type==CharacterType.Manager)return Pick(new[]{$"You are listed among the substitutes for {opponent}. Stay ready, but do not treat an appearance as guaranteed.",$"You are on the bench against {opponent}. Watch the game, stay warm, and be ready if the match needs you."},seed,spoken);
+            return Pick(new[]{$"You are on the bench for {opponent}. Keep your head in the game and be ready if your moment comes.",$"Not starting today, but the match can change quickly. Stay with the group and stay ready."},seed,spoken);
         }
         if(availability=="Unknown")
         {
-            if(character.Type==CharacterType.Manager)return Pick(new[]{$"The next fixture is {opponent}, {venue}. Selection is not confirmed yet, so prepare without assuming you will play.",$"We are preparing for {opponent}, but FIFA has not confirmed your role. Be ready for any decision and keep the work honest."},seed);
-            return Pick(new[]{$"The next one is {opponent}, but your selection is not confirmed yet. We will know closer to kickoff.",$"No guarantee you will be on the pitch against {opponent}. Stay ready and stay with the group."},seed);
+            if(character.Type==CharacterType.Manager)return Pick(new[]{$"The next fixture is {opponent}, {venue}. I have not settled on the team yet, so prepare as if you are starting.",$"We are preparing for {opponent}. I will name the side closer to kick-off, so keep the work honest this week.",$"{opponent} next, {venue}. Selection is still open. Give me a reason to pick you."},seed,spoken);
+            return Pick(new[]{$"The next one is {opponent}. Team has not gone up yet, so we are all guessing.",$"No idea if either of us is starting against {opponent}. Stay ready, yeah?",$"{opponent} next. I will find out the same time you do."},seed,spoken);
         }
-        if(character.Type==CharacterType.Manager)return Pick(rival?new[]{$"This is {opponent}, {venue}, and they will make it emotional. Be disciplined before you try to win it.",$"Rivalry matches punish loose decisions. Start with our shape against {opponent}, then let your quality decide it.",$"The occasion will be loud against {opponent}. I need your head clear and your work rate high."}:new[]{$"Against {opponent}, our first job is to control the spaces and play with patience.",$"Prepare properly for {opponent}. The details in your role will matter more than the noise around the match.",$"We have a plan for {opponent}. Trust it, communicate, and be ready for the moments that change the game."},seed);
-        if(rival)return Pick(p.Humor>=60?new[]{$"Big one against {opponent}. If the atmosphere gets wild, at least make sure we enjoy winning it.",$"They will be talking before kick-off. Let us give them something to talk about after it.",$"Rivalry day. Keep your head, win your battles, and do not give them an easy story."}:new[]{$"Big one against {opponent}. We need to set the tone early.",$"The atmosphere will be intense. Stay brave on the ball and stay together.",$"Matches like this are remembered. Let us make sure the memory belongs to us."},seed);
-        return Pick(new[]{$"Ready for {opponent}? Let us start quickly and make the match ours.",$"We have a chance to set the rhythm against {opponent}. Stay switched on from the first whistle.",$"No need for a speech. Do your job, help the man beside you, and the match will open up.",$"I have been looking forward to this one. Bring your sharpness and I will bring mine."},seed);
+        if(character.Type==CharacterType.Manager)return Pick(rival?new[]{$"This is {opponent}, {venue}, and they will make it emotional. Be disciplined before you try to win it.",$"Rivalry matches punish loose decisions. Start with our shape against {opponent}, then let your quality decide it.",$"The occasion will be loud against {opponent}. I need your head clear and your work rate high."}:new[]{$"Against {opponent}, our first job is to control the spaces and play with patience.",$"Prepare properly for {opponent}. The details in your role will matter more than the noise around the match.",$"We have a plan for {opponent}. Trust it, communicate, and be ready for the moments that change the game."},seed,spoken);
+        if(rival)return Pick(p.Humor>=60?new[]{$"Big one against {opponent}. If the atmosphere gets wild, at least make sure we enjoy winning it.",$"They will be talking before kick-off. Let us give them something to talk about after it.",$"Rivalry day. Keep your head, win your battles, and do not give them an easy story."}:new[]{$"Big one against {opponent}. We need to set the tone early.",$"The atmosphere will be intense. Stay brave on the ball and stay together.",$"Matches like this are remembered. Let us make sure the memory belongs to us."},seed,spoken);
+        return Pick(new[]{$"Ready for {opponent}? Let us start quickly and make the match ours.",$"We have a chance to set the rhythm against {opponent}. Stay switched on from the first whistle.",$"No need for a speech. Do your job, help the man beside you, and the match will open up.",$"I have been looking forward to this one. Bring your sharpness and I will bring mine."},seed,spoken);
     }
 
-    public static string Support(Character person,int severity,string opponent,int seed)
+    public static string Support(Character person,int severity,string opponent,int seed,ISet<string>? spoken=null)
     {
         var p=person.Profile.Personality;var direct=person.Profile.Communication.Directness>=70;var high=severity>=22;
-        if(person.Type==CharacterType.Agent)return Pick(high?new[]{$"I heard how badly the result against {opponent} hit you. Do not sit with this alone tonight.",$"I heard how badly the result against {opponent} hit you. Do not sit with this alone. Call me when you are somewhere quiet.",$"Do not sit with this alone. I am checking in because this is exactly when you need people around you. No performance, just talk to me."}:new[]{$"Forget the noise around the result for a moment. Call me when you are somewhere quiet.",$"Keep tonight simple: eat, rest, and let me know how your head feels tomorrow.",$"You have a career to manage, but you are also allowed to have a difficult evening. I am here."},seed);
-        if(person.Type==CharacterType.Manager)return Pick(high?new[]{$"Football can wait tonight. Speak to someone you trust and check in with me tomorrow.",$"I know the result has landed heavily. Take the evening away from the noise, then we will make a plan.",$"You are still part of this group. Rest first, then we will decide what support you need."}:new[]{$"I know this result hurts. Take tonight, clear your head, and we will talk properly tomorrow.",$"Do not let one performance become a judgement on your whole season. We will review it calmly.",$"You can be disappointed and still be ready to respond. We will help you get there."},seed);
-        return Pick(high?new[]{$"I know this one has hit you hard. You do not need to find the right words.",$"Come sit with us for a while. You do not have to talk about the match.",$"I am not going to tell you to cheer up. I am just here, and I am not going anywhere."}:new[]{$"That result is still hurting, I know. If you want company, call me.",$"Bad days happen. Stay near the lads tonight and do not disappear.",$"You do not have to pretend it was fine. We can talk when you are ready."},seed);
+        if(person.Type==CharacterType.Agent)return Pick(high?new[]{$"I heard how badly the result against {opponent} hit you. Do not sit with this alone tonight.",$"I heard how badly the result against {opponent} hit you. Do not sit with this alone. Call me when you are somewhere quiet.",$"Do not sit with this alone. I am checking in because this is exactly when you need people around you. No performance, just talk to me."}:new[]{$"Forget the noise around the result for a moment. Call me when you are somewhere quiet.",$"Keep tonight simple: eat, rest, and let me know how your head feels tomorrow.",$"You have a career to manage, but you are also allowed to have a difficult evening. I am here."},seed,spoken);
+        if(person.Type==CharacterType.Manager)return Pick(high?new[]{$"Football can wait tonight. Speak to someone you trust and check in with me tomorrow.",$"I know the result has landed heavily. Take the evening away from the noise, then we will make a plan.",$"You are still part of this group. Rest first, then we will decide what support you need."}:new[]{$"I know this result hurts. Take tonight, clear your head, and we will talk properly tomorrow.",$"Do not let one performance become a judgement on your whole season. We will review it calmly.",$"You can be disappointed and still be ready to respond. We will help you get there."},seed,spoken);
+        return Pick(high?new[]{$"I know this one has hit you hard. You do not need to find the right words.",$"Come sit with us for a while. You do not have to talk about the match.",$"I am not going to tell you to cheer up. I am just here, and I am not going anywhere."}:new[]{$"That result is still hurting, I know. If you want company, call me.",$"Bad days happen. Stay near the lads tonight and do not disappear.",$"You do not have to pretend it was fine. We can talk when you are ready."},seed,spoken);
     }
 
-    public static string TransferRequest(Character character,string status,int seed)
+    public static string TransferRequest(Character character,string status,int seed,ISet<string>? spoken=null)
     {
         if(character.Type==CharacterType.Manager)return status switch
         {
-            "Accepted"=>Pick(new[]{"The request has been accepted. We will handle the next steps professionally, but I would still like to understand what brought you here.","The club has agreed to let you leave. Before you go, tell me honestly what was missing for you here."},seed),
-            "Rejected"=>Pick(new[]{"The request was rejected. Come and speak to me properly. Why did you feel leaving was the answer?","I have not approved the request. I need to hear from you directly, not through headlines or an agent."},seed),
-            _=>Pick(new[]{"I have seen the transfer request. Before we decide anything, tell me why you want to leave.","You handed in a request. I am disappointed, but I would rather hear the reason from you. Is this about minutes, the squad, or something else?","This changes the conversation around your place here. Come to my office and explain what has brought you to this point."},seed)
+            "Accepted"=>Pick(new[]{"The request has been accepted. We will handle the next steps professionally, but I would still like to understand what brought you here.","The club has agreed to let you leave. Before you go, tell me honestly what was missing for you here."},seed,spoken),
+            "Rejected"=>Pick(new[]{"The request was rejected. Come and speak to me properly. Why did you feel leaving was the answer?","I have not approved the request. I need to hear from you directly, not through headlines or an agent."},seed,spoken),
+            _=>Pick(new[]{"I have seen the transfer request. Before we decide anything, tell me why you want to leave.","You handed in a request. I am disappointed, but I would rather hear the reason from you. Is this about minutes, the squad, or something else?","This changes the conversation around your place here. Come to my office and explain what has brought you to this point."},seed,spoken)
         };
         if(character.Type==CharacterType.Agent)return status switch
         {
-            "Accepted"=>Pick(new[]{"The club has accepted the request. We will keep the next steps clean and make sure you understand every option.","It is moving now. I still want your honest reason for leaving so we choose the right next club, not just the quickest one."},seed),
-            "Rejected"=>Pick(new[]{"They rejected the request. We need to decide whether you want to repair the relationship or keep pushing for a move.","The answer is no for now. Tell me what changed for you, and I will work out the next move from there."},seed),
-            _=>Pick(new[]{"I saw the request go in. Good. Now tell me the real reason you want out so I can protect your next step.","The paperwork is only the beginning. Is this about minutes, the manager, the club direction, or something personal?","I will handle the noise around the request, but I need clarity from you. Why leave now?"},seed)
+            "Accepted"=>Pick(new[]{"The club has accepted the request. We will keep the next steps clean and make sure you understand every option.","It is moving now. I still want your honest reason for leaving so we choose the right next club, not just the quickest one."},seed,spoken),
+            "Rejected"=>Pick(new[]{"They rejected the request. We need to decide whether you want to repair the relationship or keep pushing for a move.","The answer is no for now. Tell me what changed for you, and I will work out the next move from there."},seed,spoken),
+            _=>Pick(new[]{"I saw the request go in. Good. Now tell me the real reason you want out so I can protect your next step.","The paperwork is only the beginning. Is this about minutes, the manager, the club direction, or something personal?","I will handle the noise around the request, but I need clarity from you. Why leave now?"},seed,spoken)
         };
         return status switch
         {
-            "Accepted"=>Pick(new[]{"So it has been accepted. I am happy for you, but I want to know why you felt you had to leave us.","The room is talking about it. Are you okay with how quickly this is happening?"},seed),
-            "Rejected"=>Pick(new[]{"I heard they rejected it. What made you want out in the first place?","That must feel awkward. Do you think you can still be happy here after asking to leave?"},seed),
-            _=>Pick(new[]{"I saw you handed in a transfer request. Why? Is it something in the squad, or are you just ready for a change?","The lads are wondering what happened. You do not have to explain everything, but are you really trying to leave?","That is a big step. If you want to talk about it without the football language, I am here."},seed)
+            "Accepted"=>Pick(new[]{"So it has been accepted. I am happy for you, but I want to know why you felt you had to leave us.","The room is talking about it. Are you okay with how quickly this is happening?"},seed,spoken),
+            "Rejected"=>Pick(new[]{"I heard they rejected it. What made you want out in the first place?","That must feel awkward. Do you think you can still be happy here after asking to leave?"},seed,spoken),
+            _=>Pick(new[]{"I saw you handed in a transfer request. Why? Is it something in the squad, or are you just ready for a change?","The lads are wondering what happened. You do not have to explain everything, but are you really trying to leave?","That is a big step. If you want to talk about it without the football language, I am here."},seed,spoken)
         };
     }
 
-    public static string Transfer(Character agent,string from,string to,int seed)=>Pick(new[]{$"The move from {from} to {to} is complete. Settle quickly, learn the environment, and make the first opportunity count.",$"A new club means a new test. Be patient with the adjustment from {from} to {to}, but do not hide from the competition.",$"The transfer is done. Your first target at {to} is simple: earn trust every day and let the football follow.",$"Forget the announcement now. The real work starts at {to}, and I will help you manage the noise around it."},seed);
-    public static string Record(Character agent,string summary,int seed)=>Pick(new[]{$"That is not just a good performance. You have put your name into the record book. Take the moment in, then protect the standard you have set.",$"Records are built from thousands of ordinary decisions before the special day. Enjoy this one, then keep the habits that created it.",$"Your name is now attached to a piece of football history. Let yourself feel that, but do not let the attention change your work.",$"That achievement will travel with you. The next challenge is proving it was the beginning of a level, not a single afternoon."},seed);
-    public static string International(Character agent,string team,bool debut,int seed)=>debut?Pick(new[]{$"A senior debut for {team} is a real career milestone. Take it in, then keep building on it.",$"Your first cap changes how people see your career. Enjoy the pride, then return to the daily work.",$"You have crossed an important line with {team}. Keep your feet on the ground and make the next selection inevitable."},seed):Pick(new[]{$"Another cap for {team}. International matches raise your profile, but your next club performance still matters.",$"You are becoming a regular part of {team}. Manage the travel and keep your club standards high.",$"Every appearance for {team} adds experience. Bring that confidence back to the club without losing your balance."},seed);
-    public static string SquadArrival(Character player,int seed)=>Pick(new[]{$"Good to meet you. I am settling in and looking forward to playing together.",$"Welcome in. I have heard good things, but I would rather see what you are like around the group.",$"New club, new faces. If you need anything while you settle, come find me.",$"Welcome. The first few weeks are always strange, so do not be afraid to ask where everything is.",$"Good to have you here. Let us make the adjustment easier for each other."},seed);
-    public static string Statement(Character character,bool teamFirst,bool blame,bool referee,bool accountable,int seed)
+    public static string Transfer(Character agent,string from,string to,int seed,ISet<string>? spoken=null)=>Pick(new[]{$"The move from {from} to {to} is complete. Settle quickly, learn the environment, and make the first opportunity count.",$"A new club means a new test. Be patient with the adjustment from {from} to {to}, but do not hide from the competition.",$"The transfer is done. Your first target at {to} is simple: earn trust every day and let the football follow.",$"Forget the announcement now. The real work starts at {to}, and I will help you manage the noise around it."},seed,spoken);
+    public static string Record(Character agent,string summary,int seed,ISet<string>? spoken=null)=>Pick(new[]{$"That is not just a good performance. You have put your name into the record book. Take the moment in, then protect the standard you have set.",$"Records are built from thousands of ordinary decisions before the special day. Enjoy this one, then keep the habits that created it.",$"Your name is now attached to a piece of football history. Let yourself feel that, but do not let the attention change your work.",$"That achievement will travel with you. The next challenge is proving it was the beginning of a level, not a single afternoon."},seed,spoken);
+    public static string International(Character agent,string team,bool debut,int seed,ISet<string>? spoken=null)=>debut?Pick(new[]{$"A senior debut for {team} is a real career milestone. Take it in, then keep building on it.",$"Your first cap changes how people see your career. Enjoy the pride, then return to the daily work.",$"You have crossed an important line with {team}. Keep your feet on the ground and make the next selection inevitable."},seed,spoken):Pick(new[]{$"Another cap for {team}. International matches raise your profile, but your next club performance still matters.",$"You are becoming a regular part of {team}. Manage the travel and keep your club standards high.",$"Every appearance for {team} adds experience. Bring that confidence back to the club without losing your balance."},seed,spoken);
+    public static string SquadArrival(Character player,int seed,ISet<string>? spoken=null)=>Pick(new[]{$"Good to meet you. I am settling in and looking forward to playing together.",$"Welcome in. I have heard good things, but I would rather see what you are like around the group.",$"New club, new faces. If you need anything while you settle, come find me.",$"Welcome. The first few weeks are always strange, so do not be afraid to ask where everything is.",$"Good to have you here. Let us make the adjustment easier for each other."},seed,spoken);
+    public static string Statement(Character character,bool teamFirst,bool blame,bool referee,bool accountable,int seed,ISet<string>? spoken=null)
     {
-        if(character.Type==CharacterType.Manager)return blame?Pick(new[]{"We discuss problems inside the dressing room, not through the press. Keep that in mind.","If there is an issue, bring it to me directly. Public blame will not improve the team.","You are entitled to your view, but the group needs responsibility more than accusations."},seed):referee?Pick(new[]{"Do not let comments about officials become a distraction. Focus on what we control.","The decision can be debated, but the next performance cannot be.","Leave the referee discussion there. Your energy is needed on the football."},seed):accountable?Pick(new[]{"Taking responsibility was the right response. Now show it in the next performance.","Words matter, but the best answer will come in training and the next match.","That was mature. Keep the ownership when the work becomes difficult."},seed):"The team will judge the statement by what happens next.";
-        if(teamFirst)return Pick(new[]{"The squad appreciated you putting the team first in there. We stay together.","Good answer. Nobody wins alone, and the lads noticed you said it.","That is the kind of message that keeps a dressing room connected."},seed);
-        if(blame||referee)return Pick(new[]{"Some of the lads noticed those comments. Better to settle it face to face in the dressing room.","The headlines will move on, but the people in the room will remember how it felt.","Come speak to us directly. It is easier to fix tension when nobody is performing for cameras."},seed);
-        return accountable?Pick(new[]{"Fair answer. We can respect someone who owns their part.","That sounded honest. Now let us turn it into something useful.","The supporters will appreciate the honesty if the next performance follows it."},seed):"I saw the interview. We will see how the next match feels.";
+        if(character.Type==CharacterType.Manager)return blame?Pick(new[]{"We discuss problems inside the dressing room, not through the press. Keep that in mind.","If there is an issue, bring it to me directly. Public blame will not improve the team.","You are entitled to your view, but the group needs responsibility more than accusations."},seed,spoken):referee?Pick(new[]{"Do not let comments about officials become a distraction. Focus on what we control.","The decision can be debated, but the next performance cannot be.","Leave the referee discussion there. Your energy is needed on the football."},seed,spoken):accountable?Pick(new[]{"Taking responsibility was the right response. Now show it in the next performance.","Words matter, but the best answer will come in training and the next match.","That was mature. Keep the ownership when the work becomes difficult."},seed,spoken):"The team will judge the statement by what happens next.";
+        if(teamFirst)return Pick(new[]{"The squad appreciated you putting the team first in there. We stay together.","Good answer. Nobody wins alone, and the lads noticed you said it.","That is the kind of message that keeps a dressing room connected."},seed,spoken);
+        if(blame||referee)return Pick(new[]{"Some of the lads noticed those comments. Better to settle it face to face in the dressing room.","The headlines will move on, but the people in the room will remember how it felt.","Come speak to us directly. It is easier to fix tension when nobody is performing for cameras."},seed,spoken);
+        return accountable?Pick(new[]{"Fair answer. We can respect someone who owns their part.","That sounded honest. Now let us turn it into something useful.","The supporters will appreciate the honesty if the next performance follows it."},seed,spoken):"I saw the interview. We will see how the next match feels.";
     }
 
     private static IReadOnlyList<string> BuildDirectLines(Character character,Career career,Relationship relationship,CharacterState state,PlayerState player,string intent,SceneType scene,Personality p,CommunicationStyle c)
@@ -237,7 +215,27 @@ public static class OfflineDialogueLibrary
         return "general";
     }
     private static bool Contains(string text,params string[] terms)=>terms.Any(term=>text.Contains(term,StringComparison.OrdinalIgnoreCase));
-    private static string Pick(IReadOnlyList<string> values,int seed)=>values.Count==0?"I am here.":values[Math.Abs(seed)%values.Count];
+
+    /// <summary>
+    /// Picks a line and, when several characters are reacting to the same event, records it so the next
+    /// speaker moves on to another one. Two people sending the player identical words is the fastest way
+    /// to break the illusion that they are separate people.
+    /// </summary>
+    private static string Pick(IReadOnlyList<string> values,int seed,ISet<string>? spoken=null)
+    {
+        if(values.Count==0)return "I am here.";
+        var offset=Math.Abs(seed)%values.Count;
+        if(spoken is null)return values[offset];
+        for(var i=0;i<values.Count;i++)
+        {
+            var candidate=values[(offset+i)%values.Count];
+            if(spoken.Add(Normalize(candidate)))return candidate;
+        }
+        return values[offset];
+    }
+
+    /// <summary>Compares lines by their words alone, so punctuation or casing cannot hide a repeat.</summary>
+    internal static string Normalize(string text)=>new(text.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
     private static int Seed(params string[] values){unchecked{var hash=17;foreach(var value in values){foreach(var ch in value)hash=hash*31+ch;hash=hash*31+1;}return hash&int.MaxValue;}}
     private static string Trim(string value,int length)=>value.Length<=length?value:value[..length]+"...";
 }

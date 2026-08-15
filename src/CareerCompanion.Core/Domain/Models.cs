@@ -49,12 +49,26 @@ public sealed record MatchInput(string Date, string Competition, string Opponent
     int TeamScore, int OpponentScore, bool Started, int Minutes, int Goals, int Assists,
     double Rating, bool YellowCard, bool RedCard, bool PenaltyScored, bool PenaltyMissed,
     string Notes, string? NextOpponent = null, bool IsDerby = false, bool IsMajorFixture = false,
-    bool StartedKnown = true, string TeamContext = "Club", string RepresentingTeam = "", bool ScoreKnown = true)
+    bool StartedKnown = true, string TeamContext = "Club", string RepresentingTeam = "", bool ScoreKnown = true,
+    bool IsHomeKnown = true)
 {
     public string ScoreLabel => ScoreKnown ? $"{TeamScore}-{OpponentScore}" : "Score unknown";
+    /// <summary>"vs"/"at" only when FIFA actually confirmed the venue, so dialogue never invents it.</summary>
+    public string VenueLabel => IsHomeKnown ? (IsHome ? "vs" : "at") : "against";
+    /// <summary>
+    /// False when the import could not name the opposition. Dialogue must then leave the opponent out
+    /// entirely rather than repeat a placeholder, which would read as software talking.
+    /// </summary>
+    public bool OpponentKnown => !string.IsNullOrWhiteSpace(Opponent)
+        && !Opponent.Equals("Opponent unknown", StringComparison.OrdinalIgnoreCase)
+        && !Opponent.Equals("Unknown", StringComparison.OrdinalIgnoreCase);
+    public string Outcome => !ScoreKnown ? "U" : TeamScore > OpponentScore ? "W" : TeamScore < OpponentScore ? "L" : "D";
 }
 
 public sealed record CareerMatch(long Id, long CareerId, MatchInput Input, string Result, DateTime CreatedAt);
+/// <summary>How one team-mate performed in a match, as recorded by the save provider.</summary>
+public sealed record MatchPerformance(string ExternalId, string Name, string Position, bool Started, int Minutes, double Rating);
+public sealed record CachedProviderArticle(string Key, string Date, int TeamId, int RelatedTeamId, string Title, string Body);
 public sealed record CareerFixture(long Id, long CareerId, string Provider, string EventKey, string Date,
     string Competition, string Opponent, bool IsHome, string Status, int Confidence, string Evidence,
     DateTime UpdatedAt, string TeamContext = "Club", string RepresentingTeam = "", string Availability = "Unknown");

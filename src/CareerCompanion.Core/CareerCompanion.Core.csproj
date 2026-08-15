@@ -6,4 +6,8 @@
   <ItemGroup>
     <EmbeddedResource Include="Providers/Fifa18/Data/fifa18-player-names.tsv" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Lets parser tests assemble a save table set without widening the public provider surface. -->
+    <InternalsVisibleTo Include="CareerCompanion.Tests" />
+  </ItemGroup>
 </Project>
