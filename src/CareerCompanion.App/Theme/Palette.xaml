@@ -27,6 +27,7 @@
   <Color x:Key="C.Win">#4FD18B</Color>
   <Color x:Key="C.Draw">#9C97C8</Color>
   <Color x:Key="C.Shadow">#0A0820</Color>
+  <Color x:Key="C.Ink">#0B0918</Color>
 
   <!-- Surfaces -->
   <SolidColorBrush x:Key="Bg" Color="{StaticResource C.Base}"/>
@@ -44,6 +45,13 @@
   <SolidColorBrush x:Key="Text" Color="{StaticResource C.Text}"/>
   <SolidColorBrush x:Key="Muted" Color="{StaticResource C.Muted}"/>
   <SolidColorBrush x:Key="Faint" Color="{StaticResource C.Faint}"/>
+
+  <!--
+    Ink for anything that sits on a bright fill - lime, gold, orange, green. Those fills are far
+    too light for the near-white body colour, so text on them is always this near-black instead.
+    If a surface is painted with Interactive, Accent, Warm or Win, its text uses this brush.
+  -->
+  <SolidColorBrush x:Key="InkOnBright" Color="{StaticResource C.Ink}"/>
 
   <!-- Signals -->
   <SolidColorBrush x:Key="Accent" Color="{StaticResource C.Accent}"/>

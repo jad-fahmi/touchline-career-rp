@@ -130,8 +130,11 @@
     <Setter Property="Background" Value="{StaticResource Panel2}"/>
     <Setter Property="Foreground" Value="{StaticResource Text}"/>
     <Setter Property="CaretBrush" Value="{StaticResource Interactive}"/>
+    <!-- Selection is a solid lime block, so the selected run flips to ink rather than staying
+         near-white on top of it. -->
     <Setter Property="SelectionBrush" Value="{StaticResource Interactive}"/>
-    <Setter Property="SelectionOpacity" Value="0.35"/>
+    <Setter Property="SelectionOpacity" Value="0.9"/>
+    <Setter Property="SelectionTextBrush" Value="{StaticResource InkOnBright}"/>
     <Setter Property="BorderBrush" Value="{StaticResource Stroke}"/>
     <Setter Property="BorderThickness" Value="1"/>
     <Setter Property="Padding" Value="11,8"/>
@@ -200,6 +203,9 @@
     <Setter Property="Background" Value="{StaticResource Panel2}"/>
     <Setter Property="Foreground" Value="{StaticResource Text}"/>
     <Setter Property="CaretBrush" Value="{StaticResource Interactive}"/>
+    <Setter Property="SelectionBrush" Value="{StaticResource Interactive}"/>
+    <Setter Property="SelectionOpacity" Value="0.9"/>
+    <Setter Property="SelectionTextBrush" Value="{StaticResource InkOnBright}"/>
     <Setter Property="BorderBrush" Value="{StaticResource Stroke}"/>
     <Setter Property="BorderThickness" Value="1"/>
     <Setter Property="Padding" Value="11,8"/>
@@ -243,7 +249,20 @@
                         TextElement.FontFamily="{TemplateBinding FontFamily}"
                         TextElement.FontWeight="{TemplateBinding FontWeight}"
                         TextElement.FontSize="{TemplateBinding FontSize}"
-                        RecognizesAccessKey="True"/>
+                        RecognizesAccessKey="True">
+        <!--
+          The app-wide implicit TextBlock style paints near-white, and an implicit style beats
+          inherited TextElement.Foreground. A primary button is lime, so without this the label
+          would come out white on lime. Re-point the implicit style at the button's own
+          Foreground so every variant - lime, panel, ghost, danger - keeps a legible label.
+        -->
+        <ContentPresenter.Resources>
+          <Style TargetType="TextBlock">
+            <Setter Property="Foreground"
+                    Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}"/>
+          </Style>
+        </ContentPresenter.Resources>
+      </ContentPresenter>
     </Grid>
     <ControlTemplate.Triggers>
       <Trigger Property="IsMouseOver" Value="True">
@@ -281,7 +300,7 @@
   <!-- Primary: the one action a view wants you to take -->
   <Style TargetType="Button">
     <Setter Property="Background" Value="{StaticResource Interactive}"/>
-    <Setter Property="Foreground" Value="#141034"/>
+    <Setter Property="Foreground" Value="{StaticResource InkOnBright}"/>
     <Setter Property="BorderBrush" Value="Transparent"/>
     <Setter Property="BorderThickness" Value="1"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
@@ -366,7 +385,7 @@
                     Background="{StaticResource Panel2}" BorderBrush="{StaticResource StrokeStrong}"
                     BorderThickness="1.4">
               <TextBlock x:Name="Tick" Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="11"
-                         Foreground="#141034" HorizontalAlignment="Center" VerticalAlignment="Center"
+                         Foreground="{StaticResource InkOnBright}" HorizontalAlignment="Center" VerticalAlignment="Center"
                          Visibility="Collapsed"/>
             </Border>
             <ContentPresenter Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"
@@ -521,7 +540,16 @@
                               ContentTemplate="{TemplateBinding ContentTemplate}"
                               ContentStringFormat="{TemplateBinding ContentStringFormat}"
                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                              VerticalAlignment="Center"/>
+                              VerticalAlignment="Center">
+              <!-- Item templates are plain TextBlocks, so the implicit near-white style would
+                   otherwise survive onto the lime selected row. Follow the item's Foreground. -->
+              <ContentPresenter.Resources>
+                <Style TargetType="TextBlock">
+                  <Setter Property="Foreground"
+                          Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ComboBoxItem}}"/>
+                </Style>
+              </ContentPresenter.Resources>
+            </ContentPresenter>
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsHighlighted" Value="True">
@@ -529,7 +557,7 @@
             </Trigger>
             <Trigger Property="IsSelected" Value="True">
               <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource Interactive}"/>
-              <Setter TargetName="ItemBorder" Property="TextElement.Foreground" Value="#141034"/>
+              <Setter Property="Foreground" Value="{StaticResource InkOnBright}"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter Property="Opacity" Value="0.45"/>

@@ -48,7 +48,8 @@ Keep provider parsing separate from simulation and UI. New FIFA fields should be
 
 ## UI and copy rules
 
-- Match the existing FIFA 18-inspired palette. Lime action buttons use dark indigo text (`#221C54`), never white text.
+- Match the existing FIFA 18-inspired palette. Text never sits white on a bright fill. Anything painted with `Interactive` (lime), `Accent`, `Warm` or `Win` takes the `InkOnBright` brush, which is near-black. Use that brush rather than a literal hex.
+- The app-wide implicit `TextBlock` style paints near-white and beats inherited `TextElement.Foreground`, so a bright surface that only sets `TextElement.Foreground` still renders white text. Templates that host arbitrary content on a bright fill re-point the implicit style through a `ContentPresenter.Resources` entry (see `ButtonShell` and `ComboBoxItem`).
 - Check normal, hover, selected, disabled, and keyboard-focused states. Selected dropdown rows must remain readable.
 - Keep sidebar content usable without requiring horizontal scrolling.
 - Message views should show sender names, timestamps/context, and clear left/right speaker bubbles where applicable.

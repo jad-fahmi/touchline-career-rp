@@ -63,7 +63,7 @@
       <Setter Property="TextWrapping" Value="Wrap"/>
       <Style.Triggers>
         <DataTrigger Binding="{Binding Role}" Value="user">
-          <Setter Property="Foreground" Value="#141034"/>
+          <Setter Property="Foreground" Value="{StaticResource InkOnBright}"/>
         </DataTrigger>
       </Style.Triggers>
     </Style>
@@ -149,7 +149,7 @@
                 <TextBlock Grid.Column="1" Text="Review inbox" FontWeight="SemiBold" VerticalAlignment="Center" Margin="10,0,0,0"/>
                 <Border Grid.Column="2" Style="{StaticResource Badge}" Background="{StaticResource Warm}"
                         Visibility="{Binding PendingMatchReviews.Count, Converter={StaticResource Empty}, ConverterParameter=Invert}">
-                  <TextBlock Text="{Binding PendingMatchReviews.Count}" Foreground="#141034"
+                  <TextBlock Text="{Binding PendingMatchReviews.Count}" Foreground="{StaticResource InkOnBright}"
                              FontSize="11" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
               </Grid>
@@ -361,7 +361,7 @@
             <ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
           <Border Background="{StaticResource Interactive}" CornerRadius="4" Padding="9,4" VerticalAlignment="Center">
-            <TextBlock Text="{Binding FifaSyncBadge}" Foreground="#141034" FontWeight="Bold" FontSize="11"/>
+            <TextBlock Text="{Binding FifaSyncBadge}" Foreground="{StaticResource InkOnBright}" FontWeight="Bold" FontSize="11"/>
           </Border>
           <StackPanel Grid.Column="1" Margin="14,0" VerticalAlignment="Center">
             <TextBlock Text="{Binding FifaSyncStatus}" TextTrimming="CharacterEllipsis" FontSize="13"/>
@@ -1087,7 +1087,7 @@
                                       <Setter Property="CornerRadius" Value="12,12,3,12"/>
                                       <Setter Property="Background" Value="{StaticResource Interactive}"/>
                                       <Setter Property="BorderBrush" Value="{StaticResource Interactive}"/>
-                                      <Setter Property="TextElement.Foreground" Value="#141034"/>
+                                      <Setter Property="TextElement.Foreground" Value="{StaticResource InkOnBright}"/>
                                     </DataTrigger>
                                   </Style.Triggers>
                                 </Style>
