@@ -73,6 +73,35 @@ public sealed class DialogueGuardTests : IDisposable
         Assert.Equal(raw, dialogue);
     }
 
+    // The press room asked "Two goals against Cagliari. What made the difference for you today?", and the
+    // model answered with that same question plus the player's reply glued on. Nothing in the reply is
+    // prompt text or a fourth-wall break, so it was stored and shown back as the next question.
+    [Theory]
+    [InlineData("Two goals against Cagliari. What made the difference for you today? I missed a lot of shots before those two goals, my teammates were getting frustrated, so I had to score.")]
+    [InlineData("Two goals against Cagliari. What made the difference for you today?")]
+    [InlineData("I missed a lot of shots before those two goals, my teammates were getting frustrated, so I had to score.")]
+    public void A_reply_that_hands_back_the_question_or_the_answer_is_refused(string raw)
+    {
+        Assert.False(DialogueResponseGuard.TryPrepare(raw,"journalist",Interview,out _,out var rejection));
+        Assert.Equal(DialogueResponseGuard.Rejection.Parroted,rejection);
+    }
+
+    [Theory]
+    // Quoting a phrase back is how a journalist pushes, so a short repeat under a new line must survive.
+    [InlineData("You say you had to score. Does that pressure come from the dressing room or from yourself?")]
+    [InlineData("Frustrated teammates, then two goals. Is that the reaction you expect of yourself now?")]
+    [InlineData("So the misses did not stay in your head. What changes for the trip to Napoli?")]
+    public void A_journalist_quoting_a_phrase_back_is_not_mistaken_for_a_copy(string raw)
+    {
+        Assert.True(DialogueResponseGuard.TryPrepare(raw,"journalist",Interview,out var dialogue,out _));
+        Assert.Equal(raw,dialogue);
+    }
+
+    private static readonly string[] Interview=[
+        "Two goals against Cagliari. What made the difference for you today?",
+        "I missed a lot of shots before those two goals, my teammates were getting frustrated, so I had to score."
+    ];
+
     [Fact]
     public void Leaked_prompt_or_reasoning_text_is_still_refused()
     {

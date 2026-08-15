@@ -46,6 +46,9 @@ public static partial class DialogueResponseGuard
     [GeneratedRegex(@"\s{2,}",RegexOptions.CultureInvariant)]
     private static partial Regex ExtraSpace();
 
+    [GeneratedRegex(@"[^a-z0-9 ]",RegexOptions.CultureInvariant)]
+    private static partial Regex NonWord();
+
     /// <summary>
     /// FIFA is also the governing body, and the career's own competition names include "FIFA WC Qualifiers".
     /// A character discussing World Cup qualification is inside the football world, not outside it, so those
@@ -68,7 +71,7 @@ public static partial class DialogueResponseGuard
     ];
 
     /// <summary>Why a reply could not be used, so the caller can ask the model for a corrected one.</summary>
-    public enum Rejection { None, Empty, PromptEcho, FourthWall }
+    public enum Rejection { None, Empty, PromptEcho, FourthWall, Parroted }
 
     public static bool IsUsable(string? text)=>TryPrepare(text,null,out _,out _);
 
@@ -77,6 +80,14 @@ public static partial class DialogueResponseGuard
     /// guard strip a "Name:" prefix the model added in front of its own line.
     /// </summary>
     public static bool TryPrepare(string? text,string? speakerName,out string dialogue,out Rejection rejection)
+        =>TryPrepare(text,speakerName,null,out dialogue,out rejection);
+
+    /// <summary>
+    /// As above, with <paramref name="spokenAlready"/> holding the lines the model was given rather than
+    /// asked to write: the question it just put, and the answer it just received. Handing those back is a
+    /// failure the other checks cannot see, because copied text is neither prompt nor a fourth-wall break.
+    /// </summary>
+    public static bool TryPrepare(string? text,string? speakerName,IReadOnlyList<string>? spokenAlready,out string dialogue,out Rejection rejection)
     {
         dialogue="";
         rejection=Rejection.Empty;
@@ -84,6 +95,7 @@ public static partial class DialogueResponseGuard
         if(value.Length==0)return false;
         if(DialoguePayload.LooksLikePrompt(value)||IsModelMetadata(value)){rejection=Rejection.PromptEcho;return false;}
         if(BreaksFourthWall(value)){rejection=Rejection.FourthWall;return false;}
+        if(Parrots(value,spokenAlready)){rejection=Rejection.Parroted;return false;}
         dialogue=value;
         rejection=Rejection.None;
         return true;
@@ -95,6 +107,65 @@ public static partial class DialogueResponseGuard
         if(BareLabel().IsMatch(text.Trim()))return true;
         var lower=text.ToLowerInvariant();
         return MetadataMarkers.Any(marker=>lower.Contains(marker,StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A run of words this long, repeated word for word, is a copy rather than a quotation. Quoting a phrase
+    /// back at the player is how a journalist works; reproducing whole sentences is not.
+    /// </summary>
+    private const int CopiedRunWords=5;
+
+    /// <summary>How much of a reply may be copied text before there is no reply left underneath it.</summary>
+    private const double CopiedShare=.6;
+
+    /// <summary>
+    /// True when the reply is mostly the text the model was handed. A press question came back as its own
+    /// question with the player's answer stitched on the end, which reads as a new question and stays in the
+    /// interview as one, so a reply that repeats a whole line it was given is refused.
+    /// </summary>
+    public static bool Parrots(string text,IReadOnlyList<string>? spokenAlready)
+    {
+        if(spokenAlready is null||spokenAlready.Count==0)return false;
+        var reply=Words(text);
+        if(reply.Length==0)return false;
+        var copied=new bool[reply.Length];
+        foreach(var source in spokenAlready)
+        {
+            var words=Words(source);
+            if(words.Length<CopiedRunWords)continue;          // too short to tell a copy from a coincidence
+            if(Repeats(reply,words))return true;              // the whole line came straight back
+            MarkCopiedRuns(reply,words,copied);
+        }
+        return copied.Count(x=>x)>=reply.Length*CopiedShare;
+    }
+
+    /// <summary>Splits a line into comparable words, so punctuation and casing cannot hide a copy.</summary>
+    private static string[] Words(string? text)
+        =>string.IsNullOrWhiteSpace(text)?[]:NonWord().Replace(text.ToLowerInvariant()," ").Split(' ',StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>True when <paramref name="source"/> appears in <paramref name="reply"/> word for word.</summary>
+    private static bool Repeats(string[] reply,string[] source)
+    {
+        for(var i=0;i+source.Length<=reply.Length;i++)
+        {
+            var run=0;
+            while(run<source.Length&&reply[i+run]==source[run])run++;
+            if(run==source.Length)return true;
+        }
+        return false;
+    }
+
+    /// <summary>Marks every word of the reply that sits inside a long run copied from the source.</summary>
+    private static void MarkCopiedRuns(string[] reply,string[] source,bool[] copied)
+    {
+        for(var i=0;i<reply.Length;i++)
+            for(var j=0;j<source.Length;j++)
+            {
+                var run=0;
+                while(i+run<reply.Length&&j+run<source.Length&&reply[i+run]==source[j+run])run++;
+                if(run<CopiedRunWords)continue;
+                for(var k=0;k<run;k++)copied[i+k]=true;
+            }
     }
 
     /// <summary>True when the line mentions the game, the save, or the software behind the career.</summary>

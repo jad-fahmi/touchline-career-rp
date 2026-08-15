@@ -66,7 +66,7 @@ public sealed class PostMatchInterviewService(Database db)
         var prompt=$"Verified match facts:\n{JsonSerializer.Serialize(facts)}\nCurrent journalist question: {JsonSerializer.Serialize(question)}\nPlayer answer: {JsonSerializer.Serialize(answer)}\nSuggested topic if a follow-up is needed: {JsonSerializer.Serialize(fallbackNextQuestion)}";
         // A journalist who answers in JSON or mentions a save file is a formatting failure, not a reason to
         // end the interview, so the request is repeated with a correction before the written fallback is used.
-        var outcome=await new DialogueGenerator(llm).GenerateAsync(new(system,prompt,model,240,.55),"journalist",ct);
+        var outcome=await new DialogueGenerator(llm).GenerateAsync(new(system,prompt,model,240,.55),"journalist",[question,answer],ct);
         if(outcome.InputTokens+outcome.OutputTokens>0)db.AddUsage(llm.Name,model,outcome.InputTokens,outcome.OutputTokens);
         if(outcome.Succeeded)
         {

@@ -26,7 +26,7 @@ public sealed class ConversationService(Database db,ILlmProvider llm)
         else
         {
             var outcome=await new DialogueGenerator(llm).GenerateAsync(
-                new PromptBuilder().Character(character,career,rel,scene,memories,events,history,message,model,characterState,playerState,situation),character.Name,ct);
+                new PromptBuilder().Character(character,career,rel,scene,memories,events,history,message,model,characterState,playerState,situation),character.Name,[message],ct);
             tokens=(outcome.InputTokens,outcome.OutputTokens);
             if(outcome.Succeeded)
             {

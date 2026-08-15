@@ -19,7 +19,12 @@ public sealed class DialogueGenerator(ILlmProvider provider,int maxAttempts=3)
 {
     public string ProviderName=>provider.Name;
 
-    public async Task<DialogueOutcome> GenerateAsync(LlmRequest request,string? speakerName,CancellationToken ct=default)
+    /// <summary>
+    /// <paramref name="spokenAlready"/> holds lines the model was given rather than asked to write, such as
+    /// the question a journalist just asked and the answer they just heard. A reply that hands those back is
+    /// treated like any other formatting failure and corrected.
+    /// </summary>
+    public async Task<DialogueOutcome> GenerateAsync(LlmRequest request,string? speakerName,IReadOnlyList<string>? spokenAlready=null,CancellationToken ct=default)
     {
         var input=0;var output=0;string? failure=null;var correction=DialogueResponseGuard.Rejection.None;
         for(var attempt=1;attempt<=Math.Max(1,maxAttempts);attempt++)
@@ -28,7 +33,7 @@ public sealed class DialogueGenerator(ILlmProvider provider,int maxAttempts=3)
             {
                 var result=await provider.GenerateAsync(Correct(request,attempt,correction),ct);
                 input+=result.InputTokens;output+=result.OutputTokens;
-                if(DialogueResponseGuard.TryPrepare(result.Text,speakerName,out var dialogue,out var rejection))
+                if(DialogueResponseGuard.TryPrepare(result.Text,speakerName,spokenAlready,out var dialogue,out var rejection))
                     return new(result with{Text=dialogue},attempt,input,output,null);
                 correction=rejection;
                 failure=Describe(rejection);
@@ -53,6 +58,7 @@ public sealed class DialogueGenerator(ILlmProvider provider,int maxAttempts=3)
         {
             DialogueResponseGuard.Rejection.FourthWall=>"CORRECTION: your last answer referred to FIFA, a save, data, or software. Those do not exist in this world. Team selection is the manager's decision, fitness is the medical staff's, and transfers are the club's. If something is not settled yet, say so in ordinary football words.",
             DialogueResponseGuard.Rejection.PromptEcho=>"CORRECTION: your last answer leaked instructions, reasoning, or an unfinished wrapper. Write only what the character says out loud, in one JSON object, with no thinking, no labels, and no text outside the JSON.",
+            DialogueResponseGuard.Rejection.Parroted=>"CORRECTION: your last answer handed back the question you were given and the words you were answered with. Do not repeat either. Write a new line in your own words that reacts to what was said, and ask something you have not asked yet.",
             _=>"CORRECTION: your last answer could not be read. Return one JSON object with a complete dialogue string and nothing before or after it."
         };
         var force=attempt>=3?" Keep the dialogue under sixty words and finish every sentence." : "";
@@ -67,6 +73,7 @@ public sealed class DialogueGenerator(ILlmProvider provider,int maxAttempts=3)
     {
         DialogueResponseGuard.Rejection.FourthWall=>"the model kept referring to the game instead of the football world",
         DialogueResponseGuard.Rejection.PromptEcho=>"the model kept leaking prompt or reasoning text",
+        DialogueResponseGuard.Rejection.Parroted=>"the model kept repeating the question and the player's own answer instead of replying",
         _=>"the model returned nothing usable"
     };
 
