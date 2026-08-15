@@ -105,6 +105,34 @@ public sealed class MigrationTests : IDisposable
         Assert.Single(db.GetMemories(mate));
     }
 
+    [Fact]
+    public void A_briefing_that_blamed_the_game_for_an_unnamed_team_is_repaired_on_upgrade()
+    {
+        var path = Path.Combine(_dir, "legacy.db");
+        var db = new Database(path);
+        db.Migrate();
+        var career = db.CreateCareer("Save", "Player", "", 20, "Club", "League", "2017/18", "ST", 9, "2017-09-01");
+        // Written the way an older build phrased it, then rolled back so the repair runs again.
+        using (var connection = new SqliteConnection($"Data Source={path}"))
+        {
+            connection.Open();
+            using var seed = connection.CreateCommand();
+            seed.CommandText = """
+                DELETE FROM schema_migrations WHERE version=14;
+                INSERT INTO notifications(career_id,kind,title,body,action,priority,is_read,dedupe_key,created_at)
+                  VALUES($career,'Scouting','Briefing: FC Basel','Home fixture against FC Basel. player selection not confirmed by FIFA; playing time must not be assumed.','PreMatch',60,0,'legacy-briefing','2017-09-13T00:00:00');
+                """;
+            seed.Parameters.AddWithValue("$career", career);
+            seed.ExecuteNonQuery();
+        }
+
+        new Database(path).Migrate();
+
+        var repaired = db.GetNotifications(career).Single(x => x.DedupeKey == "legacy-briefing");
+        Assert.DoesNotContain("FIFA", repaired.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("the manager has not named the team yet", repaired.Body);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

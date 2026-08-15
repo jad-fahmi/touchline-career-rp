@@ -170,6 +170,18 @@ public sealed class Database(string path)
         using var v11=db.CreateCommand();v11.CommandText="INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(11,datetime('now'))";v11.ExecuteNonQuery();
         using var v12=db.CreateCommand();v12.CommandText="INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(12,datetime('now'))";v12.ExecuteNonQuery();
         using var v13=db.CreateCommand();v13.CommandText="INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(13,datetime('now'))";v13.ExecuteNonQuery();
+        // Version 14 repairs text this app wrote before availability was phrased in football language.
+        // Characters read these summaries back, so a briefing that blamed FIFA for an unnamed team would
+        // keep breaking the fiction for careers that already stored one. Only our own wording is touched.
+        using var v14=db.CreateCommand();
+        v14.CommandText="""
+            UPDATE notifications SET body=replace(body,'player selection not confirmed by FIFA; playing time must not be assumed','the manager has not named the team yet, so playing time must not be assumed')
+              WHERE body LIKE '%not confirmed by FIFA%' AND NOT EXISTS(SELECT 1 FROM schema_migrations WHERE version=14);
+            UPDATE career_events SET summary=replace(summary,'player selection not confirmed by FIFA; playing time must not be assumed','the manager has not named the team yet, so playing time must not be assumed')
+              WHERE summary LIKE '%not confirmed by FIFA%' AND NOT EXISTS(SELECT 1 FROM schema_migrations WHERE version=14);
+            INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(14,datetime('now'));
+            """;
+        v14.ExecuteNonQuery();
     }
     private static void EnsureColumn(SqliteConnection db,string table,string column,string definition){using var info=db.CreateCommand();info.CommandText=$"PRAGMA table_info([{table}])";using var reader=info.ExecuteReader();var found=false;while(reader.Read())if(string.Equals(reader.GetString(1),column,StringComparison.OrdinalIgnoreCase)){found=true;break;}reader.Close();if(found)return;using var alter=db.CreateCommand();alter.CommandText=$"ALTER TABLE [{table}] ADD COLUMN [{column}] {definition}";alter.ExecuteNonQuery();}
 

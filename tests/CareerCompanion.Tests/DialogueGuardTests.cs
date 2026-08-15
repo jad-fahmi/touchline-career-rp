@@ -53,6 +53,26 @@ public sealed class DialogueGuardTests : IDisposable
         Assert.Equal(raw,dialogue);
     }
 
+    [Theory]
+    // A journalist once printed "User Safety: safe" into a press conference: the model labelled its own
+    // output instead of speaking, which is neither a prompt echo nor a fourth-wall break.
+    [InlineData("User Safety: safe")]
+    [InlineData("Sentiment: positive")]
+    [InlineData("Content policy: no violation found")]
+    [InlineData("Toxicity: none")]
+    public void A_model_labelling_its_own_output_is_not_dialogue(string raw)
+        => Assert.False(DialogueResponseGuard.TryPrepare(raw, "journalist", out _, out _));
+
+    [Theory]
+    // Real dialogue can still contain a colon, so only a bare label with no sentence is refused.
+    [InlineData("Listen: you were the best player on that pitch.")]
+    [InlineData("One thing: keep your head up on Saturday.")]
+    public void A_colon_inside_a_real_sentence_is_left_alone(string raw)
+    {
+        Assert.True(DialogueResponseGuard.TryPrepare(raw, "journalist", out var dialogue, out _));
+        Assert.Equal(raw, dialogue);
+    }
+
     [Fact]
     public void Leaked_prompt_or_reasoning_text_is_still_refused()
     {

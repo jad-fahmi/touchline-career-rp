@@ -255,5 +255,80 @@ public sealed class FifaSyncReliabilityTests : IDisposable
         Assert.Equal("Opponent unknown", Assert.Single(later.NeedsReview).Opponent);
     }
 
+    /// <summary>Stands in for the running game so the routing can be tested without FIFA open.</summary>
+    private sealed class FakeLiveGame(Fifa18LiveMatch? match) : IFifa18LiveMatchSource
+    {
+        public int Calls { get; private set; }
+        public Fifa18LiveMatch? FindMatch(int clubTeamId, string date)
+        {
+            Calls++;
+            return match is not null && match.Date == date && match.ClubTeamId == clubTeamId ? match : null;
+        }
+    }
+
+    private static Fifa18ParsedCareer WithTeams(Fifa18ParsedCareer parsed)
+        => parsed with { TeamNames = new Dictionary<int, string> { [1842] = "Cagliari", [896] = "FC Basel" } };
+
+    [Fact]
+    public void An_opponent_the_save_cannot_prove_is_read_from_the_running_game()
+    {
+        var db = NewDb();
+        var career = Career(db);
+        var live = new FakeLiveGame(new(241, 1842, "2017-09-09", 5, 2));
+        // No article named the opponent, but the season totals belong to this appearance, which is the
+        // confidence the normalizer assigns that case.
+        var detected = Detected("2017-09-09", 50, opponent: "Opponent unknown", scoreKnown: false, review: true) with { Confidence = 70 };
+        var parsed = WithTeams(Parsed([detected]));
+
+        var outcome = new FifaSyncService(db, live).Apply(career, parsed);
+
+        var match = Assert.Single(outcome.Imported);
+        Assert.Equal("Cagliari", match.Opponent);
+        Assert.Equal(5, match.TeamScore);
+        Assert.Equal(2, match.OpponentScore);
+        Assert.True(match.ScoreKnown);
+        Assert.Empty(outcome.NeedsReview);
+    }
+
+    [Fact]
+    public void The_running_game_is_not_consulted_when_the_save_already_names_the_opponent()
+    {
+        var db = NewDb();
+        var career = Career(db);
+        var live = new FakeLiveGame(new(241, 1842, "2017-09-09", 5, 2));
+
+        new FifaSyncService(db, live).Apply(career, WithTeams(Parsed([Detected("2017-09-09", 50)])));
+
+        Assert.Equal(0, live.Calls);
+    }
+
+    [Fact]
+    public void A_recovered_opponent_does_not_wave_through_stats_that_are_still_unresolved()
+    {
+        var db = NewDb();
+        var career = Career(db);
+        var live = new FakeLiveGame(new(241, 1842, "2017-09-09", 5, 2));
+        // Two appearances in one scan leave the season totals unattributable, which is a separate problem
+        // from the opponent and must still reach the player.
+        var unattributable = Detected("2017-09-09", 50, opponent: "Opponent unknown", review: true) with { Confidence = 50 };
+
+        var outcome = new FifaSyncService(db, live).Apply(career, WithTeams(Parsed([unattributable])));
+
+        var reviewed = Assert.Single(outcome.NeedsReview);
+        Assert.Equal("Cagliari", reviewed.Opponent);
+        Assert.Empty(outcome.Imported);
+    }
+
+    [Fact]
+    public void A_closed_game_leaves_the_save_only_behaviour_untouched()
+    {
+        var db = NewDb();
+        var career = Career(db);
+        var outcome = new FifaSyncService(db, new FakeLiveGame(null))
+            .Apply(career, WithTeams(Parsed([Detected("2017-09-09", 50, opponent: "Opponent unknown", review: true)])));
+
+        Assert.Equal("Opponent unknown", Assert.Single(outcome.NeedsReview).Opponent);
+    }
+
     public void Dispose() { try { if (Directory.Exists(_dir)) Directory.Delete(_dir, true); } catch (IOException) { } }
 }

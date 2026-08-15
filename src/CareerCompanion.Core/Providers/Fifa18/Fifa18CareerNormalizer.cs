@@ -95,7 +95,7 @@ public sealed partial class Fifa18CareerNormalizer(Fifa18PlayerNameResolver? nam
             PositionName(I(play,"position")),I(clubLink,"jerseynumber"),state,detected,squad,nextFixture,squadCount,diagnostics,
             I(history,"overall"),I(clubLink,"form"),playerAvailability=="Injured",managerName,agentName,worldNews,
             playerAvailability=="Injured",nationalTeamId,nationalTeamName,opponentScout,playerAvailability,transferRequest,
-            pending,appearances,missedClubMatches,articleCache,resolvedResults);
+            pending,appearances,missedClubMatches,articleCache,resolvedResults,teamNames);
     }
 
     private Fifa18OpponentScout? BuildOpponentScout(Fifa18SaveData data,string opponentName,int clubId,DateTime careerDate)

@@ -19,9 +19,12 @@ public sealed record FifaSyncOutcome(Fifa18ScanDisposition Disposition, IReadOnl
 /// since the last import. Matches import on their own whenever the save proves what happened, so a normal
 /// session needs no action from the player at all.
 /// </summary>
-public sealed class FifaSyncService(Database db)
+public sealed class FifaSyncService(Database db, IFifa18LiveMatchSource? liveMatches = null)
 {
     public const string ProviderName = Fifa18ImportService.ProviderName;
+
+    /// <summary>Consulted only when the save cannot name an opponent, and harmless when FIFA is closed.</summary>
+    private readonly IFifa18LiveMatchSource _live = liveMatches ?? new Fifa18LiveMatchReader();
 
     public FifaSyncOutcome Apply(long careerId, Fifa18ParsedCareer parsed, FifaSyncOptions? options = null)
     {
@@ -46,7 +49,8 @@ public sealed class FifaSyncService(Database db)
         var needsReview = new List<Fifa18DetectedMatch>();
         foreach (var pending in parsed.PendingMatches)
         {
-            var detected = ResolveOpponentFromFixture(careerId, pending);
+            // Cheapest evidence first: a fixture already in the database, then the running game.
+            var detected = ResolveOpponentFromLiveGame(parsed, ResolveOpponentFromFixture(careerId, pending));
             if (db.HasProviderImport(careerId, ProviderName, detected.EventKey))
             {
                 db.SetMatchReviewStatus(careerId, ProviderName, detected.EventKey, "Imported");
@@ -107,6 +111,37 @@ public sealed class FifaSyncService(Database db)
             Confidence = Math.Clamp(detected.Confidence + 6, 0, 79),
             RequiresReview = true,
             Evidence = $"{detected.Evidence} Opponent taken from the fixture recorded for {fixture.Date} against {fixture.Opponent}, captured on an earlier scan before FIFA replaced the news for it."
+        };
+    }
+
+    /// <summary>
+    /// Asks the running game who the match was against. FIFA generates the fixture list at load and never
+    /// writes it to the save, so when the news article naming the opponent has already been discarded, the
+    /// live process holds the only remaining record of it. What comes back is the game's own account of the
+    /// match, not a guess, so the match can import on its own instead of waiting for the player.
+    ///
+    /// The lookup only runs when nothing else could name the opponent, and returns nothing when FIFA is
+    /// closed, which leaves the save-only behaviour exactly as it was.
+    /// </summary>
+    private Fifa18DetectedMatch ResolveOpponentFromLiveGame(Fifa18ParsedCareer parsed, Fifa18DetectedMatch detected)
+    {
+        if (detected.OpponentKnown || detected.TeamContext != "Club" || parsed.ClubTeamId <= 0) return detected;
+        if (_live.FindMatch(parsed.ClubTeamId, detected.Date) is not { } live) return detected;
+        var opponent = parsed.TeamNames?.GetValueOrDefault(live.OpponentTeamId, "") ?? "";
+        if (string.IsNullOrWhiteSpace(opponent)) return detected;
+        return detected with
+        {
+            Opponent = opponent,
+            OpponentTeamId = live.OpponentTeamId,
+            // A score the save already published stays authoritative; one it never published is filled in.
+            TeamScore = detected.ScoreKnown ? detected.TeamScore : live.TeamScore,
+            OpponentScore = detected.ScoreKnown ? detected.OpponentScore : live.OpponentScore,
+            ScoreKnown = true,
+            Confidence = Math.Max(detected.Confidence, 88),
+            // Anything else left unresolved, such as season totals that cannot be split between two
+            // appearances, still needs a look. Only the opponent has been settled here.
+            RequiresReview = detected.Confidence < 70,
+            Evidence = $"{detected.Evidence} Opponent and score read from the running game's record of the match on {detected.Date} ({live.TeamScore}-{live.OpponentScore})."
         };
     }
 

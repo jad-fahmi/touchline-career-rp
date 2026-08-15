@@ -467,6 +467,13 @@ public partial class MainWindow : Window
             {
                 Navigate("ReviewInbox");
             }
+            // A scan the player did not ask for still has to announce itself. The sync status only shows on
+            // the career page, so without this an automatic import is invisible from anywhere else and the
+            // player scans again by hand for something that already happened.
+            else if (automatic && result.Disposition is Fifa18ScanDisposition.MatchAutoImported or Fifa18ScanDisposition.MatchDetected)
+            {
+                ShowToast(result.Message);
+            }
         }
         catch (Exception ex)
         {

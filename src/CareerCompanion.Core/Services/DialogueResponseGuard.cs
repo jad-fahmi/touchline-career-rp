@@ -54,6 +54,19 @@ public static partial class DialogueResponseGuard
     [GeneratedRegex(@"\bfifa(\s+(club\s+)?(world\s+cup|wc|confederations\s+cup|rankings?|world\s+rankings?)(\s+qualifiers?)?)",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant)]
     private static partial Regex FootballGoverningBody();
 
+    /// <summary>
+    /// Labels a model attaches to its own output instead of speaking. "User Safety: safe" reached a press
+    /// conference this way: it is not prompt text and not a fourth-wall break, so nothing else catches it.
+    /// A whole reply that is one short "Label: value" with no sentence is never dialogue.
+    /// </summary>
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z ]{2,24}:\s*[A-Za-z0-9 _/-]{1,40}$",RegexOptions.CultureInvariant)]
+    private static partial Regex BareLabel();
+
+    private static readonly string[] MetadataMarkers=[
+        "user safety","content policy","policy violation","safety rating","flagged as","moderation",
+        "system note","internal note","confidence score","sentiment:","toxicity"
+    ];
+
     /// <summary>Why a reply could not be used, so the caller can ask the model for a corrected one.</summary>
     public enum Rejection { None, Empty, PromptEcho, FourthWall }
 
@@ -69,11 +82,19 @@ public static partial class DialogueResponseGuard
         rejection=Rejection.Empty;
         var value=Repair(text,speakerName);
         if(value.Length==0)return false;
-        if(DialoguePayload.LooksLikePrompt(value)){rejection=Rejection.PromptEcho;return false;}
+        if(DialoguePayload.LooksLikePrompt(value)||IsModelMetadata(value)){rejection=Rejection.PromptEcho;return false;}
         if(BreaksFourthWall(value)){rejection=Rejection.FourthWall;return false;}
         dialogue=value;
         rejection=Rejection.None;
         return true;
+    }
+
+    /// <summary>True when the model annotated its output instead of speaking as the character.</summary>
+    public static bool IsModelMetadata(string text)
+    {
+        if(BareLabel().IsMatch(text.Trim()))return true;
+        var lower=text.ToLowerInvariant();
+        return MetadataMarkers.Any(marker=>lower.Contains(marker,StringComparison.Ordinal));
     }
 
     /// <summary>True when the line mentions the game, the save, or the software behind the career.</summary>

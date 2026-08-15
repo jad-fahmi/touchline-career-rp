@@ -2,6 +2,281 @@ using CareerCompanion.Core.Domain;
 using CareerCompanion.Core.Persistence;
 using CareerCompanion.Core.Services;
 using CareerCompanion.Core.Providers.Fifa18;
+using System.Runtime.InteropServices;
+
+// Read-only look at the running game. The fixture list is generated at load and never written to the save,
+// so the only place it exists is the live process. Facts already known from the save (career date, player
+// id, club id) are used as anchors: whatever holds those values is a career structure, and no pointer paths
+// or module offsets are needed, which keeps this independent of where Windows happens to load the game.
+if(args.Length>0&&args[0]=="--probe-fifa18-memory")
+{
+    var anchors=args.Skip(1).Select(x=>int.TryParse(x,out var v)?v:0).Where(x=>x!=0).Distinct().ToArray();
+    if(anchors.Length==0)anchors=[20170828,138449,47];
+    var game=System.Diagnostics.Process.GetProcesses()
+        .Where(p=>p.ProcessName.Contains("fifa",StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(p=>{try{return p.WorkingSet64;}catch{return 0L;}}).FirstOrDefault();
+    if(game is null){Console.WriteLine("No FIFA process found. Start the game and load the career first.");return;}
+    Console.WriteLine($"process: {game.ProcessName} (pid {game.Id}), working set {game.WorkingSet64/1024/1024} MB");
+    Console.WriteLine($"anchors: {string.Join(", ",anchors)}");
+    var handle=MemoryProbe.OpenProcess(MemoryProbe.QueryInformation|MemoryProbe.VmRead,false,game.Id);
+    if(handle==IntPtr.Zero)
+    {
+        Console.WriteLine($"OpenProcess failed (win32 error {Marshal.GetLastWin32Error()}). Try this terminal as administrator.");
+        return;
+    }
+    var hits=anchors.ToDictionary(x=>x,_=>new List<ulong>());
+    var buffer=new byte[4*1024*1024];
+    var clock=System.Diagnostics.Stopwatch.StartNew();
+    ulong address=0x10000,scanned=0,regions=0;
+    while(address<0x7FFFFFFFFFFF)
+    {
+        if(MemoryProbe.VirtualQueryEx(handle,(IntPtr)address,out var info,(uint)Marshal.SizeOf<MemoryProbe.RegionInfo>())==0)break;
+        var size=info.RegionSize;
+        if(size==0)break;
+        const uint committed=0x1000,guard=0x100,noAccess=0x01,readable=0x02|0x04|0x08|0x20|0x40|0x80;
+        if(info.State==committed&&(info.Protect&guard)==0&&(info.Protect&noAccess)==0&&(info.Protect&readable)!=0&&size<=512UL*1024*1024)
+        {
+            regions++;
+            for(ulong offset=0;offset<size;)
+            {
+                var take=(int)Math.Min((ulong)buffer.Length,size-offset);
+                if(MemoryProbe.ReadProcessMemory(handle,(IntPtr)(address+offset),buffer,take,out var read)&&read>0)
+                {
+                    scanned+=(ulong)read;
+                    for(var i=0;i+4<=read;i+=4)
+                    {
+                        var value=BitConverter.ToInt32(buffer,i);
+                        if(value!=0&&hits.TryGetValue(value,out var found)&&found.Count<200)found.Add(address+offset+(ulong)i);
+                    }
+                }
+                offset+=(ulong)take;
+            }
+        }
+        address+=size;
+    }
+    Console.WriteLine($"scanned {scanned/1024/1024} MB across {regions} regions in {clock.ElapsedMilliseconds} ms (4-byte aligned)");
+    foreach(var anchor in anchors)
+        Console.WriteLine($"  {anchor,-10} {hits[anchor].Count,4} hits{(hits[anchor].Count>0?"  first at 0x"+hits[anchor][0].ToString("X"):"")}");
+
+    // What sits around an anchor is the interesting part: a fixture record would place a date beside two
+    // team ids, so the first hits are dumped for inspection rather than guessed at.
+    var window=new byte[192];
+    foreach(var anchor in anchors)
+        foreach(var hit in hits[anchor].Take(2))
+        {
+            var start=hit>=64?hit-64:hit;
+            if(!MemoryProbe.ReadProcessMemory(handle,(IntPtr)start,window,window.Length,out var read)||read<64)continue;
+            Console.WriteLine($"\n{anchor} @ 0x{hit:X} (window from 0x{start:X}):");
+            for(var row=0;row+16<=read;row+=16)
+            {
+                var offsetInWindow=row;
+                var ints=string.Join(" ",Enumerable.Range(0,4).Select(i=>BitConverter.ToInt32(window,offsetInWindow+i*4).ToString().PadLeft(11)));
+                Console.WriteLine($"   +{row-64,4}  {Convert.ToHexString(window,row,16)}  {ints}");
+            }
+        }
+    MemoryProbe.CloseHandle(handle);
+    return;
+}
+
+// Finds the two halves of a fixture. A schedule record has to place the two clubs close together, so
+// every place in memory where both team ids sit within a short distance is a candidate, and the save
+// already tells us which pairing to expect.
+// Looks for the season schedule without knowing its layout: an array of fixtures shows up as many career
+// dates spaced at a fixed stride, which no other structure does.
+if(args.Length>0&&args[0]=="--probe-fifa18-schedule")
+{
+    var game=System.Diagnostics.Process.GetProcesses()
+        .Where(p=>p.ProcessName.Contains("fifa",StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(p=>{try{return p.WorkingSet64;}catch{return 0L;}}).FirstOrDefault();
+    if(game is null){Console.WriteLine("No FIFA process found.");return;}
+    var handle=MemoryProbe.OpenProcess(MemoryProbe.QueryInformation|MemoryProbe.VmRead,false,game.Id);
+    if(handle==IntPtr.Zero){Console.WriteLine($"OpenProcess failed (win32 error {Marshal.GetLastWin32Error()}).");return;}
+    var dates=new List<ulong>();
+    var buffer=new byte[4*1024*1024];
+    ulong address=0x10000;
+    while(address<0x7FFFFFFFFFFF)
+    {
+        if(MemoryProbe.VirtualQueryEx(handle,(IntPtr)address,out var info,(uint)Marshal.SizeOf<MemoryProbe.RegionInfo>())==0)break;
+        var size=info.RegionSize;
+        if(size==0)break;
+        const uint committed=0x1000,guard=0x100,noAccess=0x01,readable=0x02|0x04|0x08|0x20|0x40|0x80;
+        if(info.State==committed&&(info.Protect&guard)==0&&(info.Protect&noAccess)==0&&(info.Protect&readable)!=0&&size<=512UL*1024*1024)
+            for(ulong offset=0;offset<size;)
+            {
+                var take=(int)Math.Min((ulong)buffer.Length,size-offset);
+                if(MemoryProbe.ReadProcessMemory(handle,(IntPtr)(address+offset),buffer,take,out var read)&&read>0)
+                    for(var i=0;i+4<=read;i+=4)
+                    {
+                        var value=BitConverter.ToInt32(buffer,i);
+                        if(value is >=20170000 and <20190000&&dates.Count<2_000_000)dates.Add(address+offset+(ulong)i);
+                    }
+                offset+=(ulong)take;
+            }
+        address+=size;
+    }
+    dates.Sort();
+    Console.WriteLine($"career-dated int32 values in memory: {dates.Count}");
+    var known=dates.ToHashSet();
+    var runs=new List<(ulong Start,ulong Stride,int Count)>();
+    var seen=new HashSet<ulong>();
+    foreach(var start in dates)
+    {
+        if(seen.Contains(start))continue;
+        for(ulong stride=8;stride<=256;stride+=4)
+        {
+            var runLength=1;var at=start;
+            while(known.Contains(at+stride)){runLength++;at+=stride;}
+            if(runLength<6)continue;
+            for(var step=start;step<=at;step+=stride)seen.Add(step);
+            runs.Add((start,stride,runLength));
+            break;
+        }
+        if(runs.Count>=200)break;
+    }
+    foreach(var run in runs.OrderByDescending(x=>x.Count).Take(12))
+        Console.WriteLine($"  run of {run.Count,4} dates at stride {run.Stride,3} starting 0x{run.Start:X}");
+    if(runs.Count==0)Console.WriteLine("  no regularly spaced runs of dates found");
+    MemoryProbe.CloseHandle(handle);
+    return;
+}
+
+// Finds fixtures by the shape already confirmed in memory: two team ids followed closely by a career date.
+// Filtering on the career club keeps it to the fixtures Touchline actually needs.
+if(args.Length>0&&args[0]=="--probe-fifa18-fixtures-live")
+{
+    var club=int.Parse(args[1]);
+    var game=System.Diagnostics.Process.GetProcesses()
+        .Where(p=>p.ProcessName.Contains("fifa",StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(p=>{try{return p.WorkingSet64;}catch{return 0L;}}).FirstOrDefault();
+    if(game is null){Console.WriteLine("No FIFA process found.");return;}
+    var handle=MemoryProbe.OpenProcess(MemoryProbe.QueryInformation|MemoryProbe.VmRead,false,game.Id);
+    if(handle==IntPtr.Zero){Console.WriteLine($"OpenProcess failed (win32 error {Marshal.GetLastWin32Error()}).");return;}
+    var found=new List<(ulong Address,int A,int B,int Date,int X,int Y)>();
+    var buffer=new byte[4*1024*1024];
+    ulong address=0x10000;
+    while(address<0x7FFFFFFFFFFF)
+    {
+        if(MemoryProbe.VirtualQueryEx(handle,(IntPtr)address,out var info,(uint)Marshal.SizeOf<MemoryProbe.RegionInfo>())==0)break;
+        var size=info.RegionSize;
+        if(size==0)break;
+        const uint committed=0x1000,guard=0x100,noAccess=0x01,readable=0x02|0x04|0x08|0x20|0x40|0x80;
+        if(info.State==committed&&(info.Protect&guard)==0&&(info.Protect&noAccess)==0&&(info.Protect&readable)!=0&&size<=512UL*1024*1024)
+            for(ulong offset=0;offset<size;)
+            {
+                var take=(int)Math.Min((ulong)buffer.Length,size-offset);
+                if(MemoryProbe.ReadProcessMemory(handle,(IntPtr)(address+offset),buffer,take,out var read)&&read>0)
+                    for(var i=12;i+12<=read;i+=4)
+                    {
+                        var date=BitConverter.ToInt32(buffer,i);
+                        if(date is < 20170000 or >=20190000)continue;
+                        var a=BitConverter.ToInt32(buffer,i-8);
+                        var b=BitConverter.ToInt32(buffer,i-4);
+                        if(a!=club&&b!=club)continue;
+                        if(a<=0||b<=0||a==b||a>200000||b>200000)continue;
+                        // A match record puts the two goal tallies straight after the date. Nothing else
+                        // that mentions a club near a date does that, so it separates fixtures from noise.
+                        var x=BitConverter.ToInt32(buffer,i+4);var y=BitConverter.ToInt32(buffer,i+8);
+                        if(x is < 0 or > 15||y is < 0 or > 15)continue;
+                        if(found.Count<400)found.Add((address+offset+(ulong)i,a,b,date,x,y));
+                    }
+                offset+=(ulong)take;
+            }
+        address+=size;
+    }
+    Console.WriteLine($"fixture-shaped records mentioning club {club}: {found.Count}");
+    foreach(var row in found.OrderBy(x=>x.Date).Take(60))
+        Console.WriteLine($"  0x{row.Address:X}  {row.A,7} v {row.B,7}  {row.Date}   then {row.X,4} {row.Y,4}");
+    MemoryProbe.CloseHandle(handle);
+    return;
+}
+
+// Exercises the shipped reader rather than the ad-hoc probes, so what the app will do can be checked.
+if(args.Length>0&&args[0]=="--probe-fifa18-live")
+{
+    var club=int.Parse(args[1]);var date=args[2];
+    var clock=System.Diagnostics.Stopwatch.StartNew();
+    var match=new Fifa18LiveMatchReader().FindMatch(club,date);
+    Console.WriteLine(match is null
+        ?$"no live record for club {club} on {date} ({clock.ElapsedMilliseconds} ms)"
+        :$"live record: club {match.ClubTeamId} v {match.OpponentTeamId} on {match.Date}, {match.TeamScore}-{match.OpponentScore} ({clock.ElapsedMilliseconds} ms)");
+    return;
+}
+
+// Raw window of the live game's memory, printed as int32 rows, for mapping a structure once it is found.
+if(args.Length>0&&args[0]=="--probe-fifa18-dump")
+{
+    var start=Convert.ToUInt64(args[1].Replace("0x",""),16);
+    var length=args.Length>2?int.Parse(args[2]):1024;
+    var stride=args.Length>3?int.Parse(args[3]):4;
+    var game=System.Diagnostics.Process.GetProcesses()
+        .Where(p=>p.ProcessName.Contains("fifa",StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(p=>{try{return p.WorkingSet64;}catch{return 0L;}}).FirstOrDefault();
+    if(game is null){Console.WriteLine("No FIFA process found.");return;}
+    var handle=MemoryProbe.OpenProcess(MemoryProbe.QueryInformation|MemoryProbe.VmRead,false,game.Id);
+    if(handle==IntPtr.Zero){Console.WriteLine($"OpenProcess failed (win32 error {Marshal.GetLastWin32Error()}).");return;}
+    var bytes=new byte[length];
+    if(!MemoryProbe.ReadProcessMemory(handle,(IntPtr)start,bytes,length,out var got)||got<=0)
+    {
+        Console.WriteLine($"read failed at 0x{start:X} (win32 error {Marshal.GetLastWin32Error()})");
+        MemoryProbe.CloseHandle(handle);return;
+    }
+    for(var row=0;row+stride*4<=got;row+=stride*4)
+        Console.WriteLine($"0x{start+(ulong)row:X}  {string.Join(" ",Enumerable.Range(0,stride).Select(i=>BitConverter.ToInt32(bytes,row+i*4).ToString().PadLeft(11)))}");
+    MemoryProbe.CloseHandle(handle);
+    return;
+}
+
+if(args.Length>0&&args[0]=="--probe-fifa18-pair")
+{
+    var left=int.Parse(args[1]);var right=int.Parse(args[2]);
+    var window=args.Length>3?int.Parse(args[3]):64;
+    var game=System.Diagnostics.Process.GetProcesses()
+        .Where(p=>p.ProcessName.Contains("fifa",StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(p=>{try{return p.WorkingSet64;}catch{return 0L;}}).FirstOrDefault();
+    if(game is null){Console.WriteLine("No FIFA process found. Start the game and load the career first.");return;}
+    var handle=MemoryProbe.OpenProcess(MemoryProbe.QueryInformation|MemoryProbe.VmRead,false,game.Id);
+    if(handle==IntPtr.Zero){Console.WriteLine($"OpenProcess failed (win32 error {Marshal.GetLastWin32Error()}).");return;}
+    Console.WriteLine($"searching for {left} and {right} within {window} bytes of each other (pid {game.Id})");
+    var lefts=new List<ulong>();var rights=new List<ulong>();
+    var buffer=new byte[4*1024*1024];
+    ulong address=0x10000;
+    while(address<0x7FFFFFFFFFFF)
+    {
+        if(MemoryProbe.VirtualQueryEx(handle,(IntPtr)address,out var info,(uint)Marshal.SizeOf<MemoryProbe.RegionInfo>())==0)break;
+        var size=info.RegionSize;
+        if(size==0)break;
+        const uint committed=0x1000,guard=0x100,noAccess=0x01,readable=0x02|0x04|0x08|0x20|0x40|0x80;
+        if(info.State==committed&&(info.Protect&guard)==0&&(info.Protect&noAccess)==0&&(info.Protect&readable)!=0&&size<=512UL*1024*1024)
+            for(ulong offset=0;offset<size;)
+            {
+                var take=(int)Math.Min((ulong)buffer.Length,size-offset);
+                if(MemoryProbe.ReadProcessMemory(handle,(IntPtr)(address+offset),buffer,take,out var read)&&read>0)
+                    for(var i=0;i+4<=read;i+=4)
+                    {
+                        var value=BitConverter.ToInt32(buffer,i);
+                        if(value==left&&lefts.Count<400000)lefts.Add(address+offset+(ulong)i);
+                        else if(value==right&&rights.Count<400000)rights.Add(address+offset+(ulong)i);
+                    }
+                offset+=(ulong)take;
+            }
+        address+=size;
+    }
+    Console.WriteLine($"{left}: {lefts.Count} hits, {right}: {rights.Count} hits");
+    var rightSet=rights.ToHashSet();
+    var pairs=lefts.Where(a=>Enumerable.Range(-window/4,window/2).Any(step=>step!=0&&rightSet.Contains((ulong)((long)a+step*4)))).Take(12).ToList();
+    Console.WriteLine($"co-located pairs: {pairs.Count}{(pairs.Count==12?"+ (showing first 12)":"")}");
+    var dump=new byte[160];
+    foreach(var hit in pairs)
+    {
+        var start=hit>=64?hit-64:hit;
+        if(!MemoryProbe.ReadProcessMemory(handle,(IntPtr)start,dump,dump.Length,out var read)||read<64)continue;
+        Console.WriteLine($"\npair at 0x{hit:X}:");
+        for(var row=0;row+16<=read;row+=16)
+            Console.WriteLine($"   +{row-64,4}  {string.Join(" ",Enumerable.Range(0,4).Select(i=>BitConverter.ToInt32(dump,row+i*4).ToString().PadLeft(11)))}");
+    }
+    MemoryProbe.CloseHandle(handle);
+    return;
+}
 
 if(args.Length>0&&args[0]=="--probe-fifa18")
 {
@@ -44,6 +319,104 @@ if(args.Length>0&&args[0]=="--dump-fifa18-table")
     foreach(var row in rows.TakeLast(take))
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(row.ToDictionary(x=>x.Key,x=>x.Value is string s&&s.Length>300?s[..300]+"…":x.Value)));
     return;
+}
+
+// Schema discovery by data rather than by field width: finds every table whose values look like career
+// dates or team ids, which is how an unmapped fixture, schedule, or result table would announce itself.
+if(args.Length>0&&args[0]=="--find-fifa18-fixtures")
+{
+    var path=Path.GetFullPath(args[1]);var bytes=await File.ReadAllBytesAsync(path);
+    var teamIds=Fifa18SaveInspector.ReadTable(bytes,"lyxL").Select(r=>r.TryGetValue("mCXg",out var v)&&v is long id?id:-1).Where(x=>x>0).ToHashSet();
+    Console.WriteLine($"known team ids: {teamIds.Count}");
+    foreach(var table in Fifa18SaveInspector.Describe(bytes).OrderByDescending(x=>x.RecordCount))
+    {
+        if(table.RecordCount==0||(long)table.RecordCount*table.Fields.Count>600_000)continue;
+        var rows=Fifa18SaveInspector.ReadTable(bytes,table.ShortName);
+        if(rows.Count==0)continue;
+        var dateFields=new List<string>();var teamFields=new List<string>();
+        // FIFA stores an integer as value-minus-RangeLow, and the inspector reads raw bits, so a date is
+        // only recognisable once the usual 20080101 base is added back. Both readings are tested.
+        static bool IsDate(long v)=>v is >=20170000 and <20200000||v is >=2017000000 and <2020000000
+            ||v>0&&v+20080101 is >=20170000 and <20200000;
+        foreach(var field in table.Fields.Select(x=>x.ShortName))
+        {
+            var values=rows.Select(r=>r.TryGetValue(field,out var v)&&v is long n?n:long.MinValue).Where(x=>x!=long.MinValue&&x!=0).ToList();
+            if(values.Count<Math.Max(2,rows.Count/4))continue;
+            var spread=values.Distinct().Count();
+            var dates=values.Count(IsDate);
+            // Team ids start at 1, so small integers match by accident. A real team reference has many
+            // distinct values and mostly sits above the handful of single-digit ids.
+            var teams=values.Count(x=>teamIds.Contains(x)&&x>100);
+            if(dates>=values.Count*3/4)dateFields.Add($"{field}({spread} distinct, e.g. {values[0]})");
+            if(teams>=values.Count*3/4&&spread>=8)teamFields.Add($"{field}({spread} distinct)");
+        }
+        if(dateFields.Count>0||teamFields.Count>=2)
+            Console.WriteLine($"{table.ShortName} rows={table.RecordCount,6} dates=[{string.Join(", ",dateFields)}] teams=[{string.Join(", ",teamFields)}]");
+    }
+    return;
+}
+
+// Every row that changed between two saves, table by table. The decisive test for whether a match result
+// is persisted anywhere: if it is, the rows holding it move when a match is played.
+if(args.Length>0&&args[0]=="--diff-fifa18-rows")
+{
+    var before=await File.ReadAllBytesAsync(Path.GetFullPath(args[1]));
+    var after=await File.ReadAllBytesAsync(Path.GetFullPath(args[2]));
+    foreach(var table in Fifa18SaveInspector.Describe(after).OrderByDescending(x=>x.RecordCount))
+    {
+        if(table.RecordCount==0)continue;
+        var a=Fifa18SaveInspector.ReadTable(before,table.ShortName);
+        var b=Fifa18SaveInspector.ReadTable(after,table.ShortName);
+        if(a.Count==0||b.Count==0)continue;
+        var changed=0;var samples=new List<string>();
+        for(var i=0;i<Math.Min(a.Count,b.Count);i++)
+        {
+            var diffs=b[i].Where(x=>a[i].TryGetValue(x.Key,out var old)&&!Equals(old,x.Value))
+                .Select(x=>$"{x.Key} {a[i][x.Key]}->{x.Value}").ToList();
+            if(diffs.Count==0)continue;
+            changed++;
+            if(samples.Count<3)samples.Add($"row{i}: {string.Join(", ",diffs.Take(8))}");
+        }
+        if(changed>0||a.Count!=b.Count)
+        {
+            Console.WriteLine($"{table.ShortName} rows {a.Count}->{b.Count}, {changed} rows changed");
+            foreach(var sample in samples)Console.WriteLine($"    {sample}");
+        }
+    }
+    return;
+}
+
+// Value-level diff for one team across two saves. Whatever a played match changes about a club is what
+// the save records about results, which is how an unnamed opponent could be identified from standings
+// rather than from a news article that has already rotated away.
+if(args.Length>0&&args[0]=="--diff-fifa18-team")
+{
+    var before=await File.ReadAllBytesAsync(Path.GetFullPath(args[1]));
+    var after=await File.ReadAllBytesAsync(Path.GetFullPath(args[2]));
+    var teamId=long.Parse(args[3]);
+    Console.WriteLine($"changes for team {teamId}:");
+    foreach(var table in Fifa18SaveInspector.Describe(after).OrderByDescending(x=>x.RecordCount))
+    {
+        if(table.RecordCount==0||!table.Fields.Any(f=>f.ShortName=="mCXg"))continue;
+        var a=ByTeam(Fifa18SaveInspector.ReadTable(before,table.ShortName));
+        var b=ByTeam(Fifa18SaveInspector.ReadTable(after,table.ShortName));
+        if(a is null||b is null||!a.TryGetValue(teamId,out var rowA)||!b.TryGetValue(teamId,out var rowB))continue;
+        var changes=rowB.Where(x=>rowA.TryGetValue(x.Key,out var old)&&!Equals(old,x.Value))
+            .Select(x=>$"{x.Key}: {rowA[x.Key]} -> {x.Value}").ToList();
+        if(changes.Count>0)Console.WriteLine($"  {table.ShortName} (rows={table.RecordCount}) {string.Join(", ",changes)}");
+    }
+    return;
+
+    // Rows can only be compared across saves when the team id identifies them uniquely.
+    static Dictionary<long,IReadOnlyDictionary<string,object>>? ByTeam(IReadOnlyList<IReadOnlyDictionary<string,object>> rows)
+    {
+        var map=new Dictionary<long,IReadOnlyDictionary<string,object>>();
+        foreach(var row in rows)
+        {
+            if(!row.TryGetValue("mCXg",out var value)||value is not long id||!map.TryAdd(id,row))return null;
+        }
+        return map;
+    }
 }
 
 // Walks a series of real saves the way the app does: the state of the last imported match becomes
@@ -177,3 +550,21 @@ if(args.Contains("--show-messages"))foreach(var m in allMessages)Console.WriteLi
 var repeats=allMessages.GroupBy(x=>x.Content,StringComparer.Ordinal).Where(g=>g.Count()>1).OrderByDescending(g=>g.Count()).Take(6).ToList();
 if(repeats.Count>0){Console.WriteLine("Most repeated lines:");foreach(var g in repeats)Console.WriteLine($"  x{g.Count()} {g.Key[..Math.Min(90,g.Key.Length)]}");}Console.WriteLine("NEWS SAMPLE:");foreach(var item in db.GetNews(career,10000).Take(6))Console.WriteLine($"  [{item.Outlet}] {item.Headline} | {item.Body}");foreach(var item in db.GetSocial(career,10000).Take(4))Console.WriteLine($"  ({item.Author}) {item.Content}");
 Console.WriteLine($"Events: {db.GetEvents(career,10000).Count}; news: {db.GetNews(career,10000).Count}; social: {db.GetSocial(career,10000).Count}");foreach(var x in totals.OrderByDescending(x=>x.Value))Console.WriteLine($"{x.Key,-24} {x.Value,4}");
+
+/// <summary>Read-only access to another process. Nothing here writes to the game or to a save.</summary>
+static class MemoryProbe
+{
+    public const int QueryInformation=0x0400,VmRead=0x0010;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RegionInfo
+    {
+        public IntPtr BaseAddress;public IntPtr AllocationBase;public uint AllocationProtect;public uint Alignment1;
+        public ulong RegionSize;public uint State;public uint Protect;public uint Type;public uint Alignment2;
+    }
+
+    [DllImport("kernel32.dll",SetLastError=true)] public static extern IntPtr OpenProcess(int access,bool inheritHandle,int processId);
+    [DllImport("kernel32.dll",SetLastError=true)] public static extern bool ReadProcessMemory(IntPtr process,IntPtr address,byte[] buffer,int size,out int read);
+    [DllImport("kernel32.dll",SetLastError=true)] public static extern int VirtualQueryEx(IntPtr process,IntPtr address,out RegionInfo info,uint length);
+    [DllImport("kernel32.dll",SetLastError=true)] public static extern bool CloseHandle(IntPtr handle);
+}

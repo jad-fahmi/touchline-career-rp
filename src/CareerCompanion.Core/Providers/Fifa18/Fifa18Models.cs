@@ -123,7 +123,9 @@ public sealed record Fifa18ParsedCareer(
     IReadOnlyList<Fifa18Appearance>? Appearances = null,
     int MissedClubMatches = 0,
     IReadOnlyList<CachedProviderArticle>? ArticleCache = null,
-    IReadOnlyList<Fifa18ResolvedResult>? ResolvedResults = null)
+    IReadOnlyList<Fifa18ResolvedResult>? ResolvedResults = null,
+    /// <summary>Team id to club name, so an id read from elsewhere can be named without reparsing the save.</summary>
+    IReadOnlyDictionary<int,string>? TeamNames = null)
 {
     /// <summary>Every appearance detected since the last import, oldest first.</summary>
     public IReadOnlyList<Fifa18DetectedMatch> PendingMatches => NewMatches ?? (LatestMatch is null ? [] : [LatestMatch]);
