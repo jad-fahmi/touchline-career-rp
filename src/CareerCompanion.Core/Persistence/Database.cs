@@ -462,7 +462,42 @@ public sealed class Database(string path)
     public IReadOnlyList<ConversationMessage> GetMessages(long careerId,long characterId,int limit=40){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="""SELECT m.conversation_id,m.role,m.content,m.timestamp,c.scene,c.timestamp,(SELECT p.content FROM messages p WHERE p.conversation_id=m.conversation_id AND p.role='user' AND p.id<m.id ORDER BY p.id DESC LIMIT 1) FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.career_id=$c AND c.character_id=$ch ORDER BY m.timestamp DESC,m.id DESC LIMIT $n""";cmd.Parameters.AddWithValue("$c",careerId);cmd.Parameters.AddWithValue("$ch",characterId);cmd.Parameters.AddWithValue("$n",limit);using var r=cmd.ExecuteReader();var l=new List<ConversationMessage>();while(r.Read())l.Add(new(r.GetString(1),r.GetString(2),DateTime.Parse(r.GetString(3)),r.GetInt64(0),r.GetString(4),DateTime.Parse(r.GetString(5)),r.IsDBNull(6)?null:r.GetString(6)));l.Reverse();return l;}
 
     public string? GetSetting(string key){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT value FROM settings WHERE key=$k";cmd.Parameters.AddWithValue("$k",key);return cmd.ExecuteScalar() as string;}
-    public long? FindCareerIdByFifaPlayerId(int playerId){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT key FROM settings WHERE key LIKE 'career:%:fifa_player_id' AND value=$player LIMIT 1";cmd.Parameters.AddWithValue("$player",playerId.ToString());var key=cmd.ExecuteScalar() as string;if(key is null)return null;var parts=key.Split(':');return parts.Length>=3&&long.TryParse(parts[1],out var id)?id:null;}
+    /// <summary>
+    /// The career that follows this FIFA player. Older duplicates can share a player id, so the one
+    /// synchronized most recently wins: that is the career actually being played, and picking an arbitrary
+    /// row would quietly send new matches into an abandoned one.
+    /// </summary>
+    public long? FindCareerIdByFifaPlayerId(int playerId)
+    {
+        using var db=Open();
+        var ids=new List<long>();
+        using(var cmd=db.CreateCommand())
+        {
+            cmd.CommandText="SELECT key FROM settings WHERE key LIKE 'career:%:fifa_player_id' AND value=$player";
+            cmd.Parameters.AddWithValue("$player",playerId.ToString());
+            using var reader=cmd.ExecuteReader();
+            while(reader.Read())if(CareerIdFromKey(reader.GetString(0)) is { } id)ids.Add(id);
+        }
+        if(ids.Count<=1)return ids.Count==1?ids[0]:null;
+        var synchronized=new Dictionary<long,DateTime>();
+        using(var stamps=db.CreateCommand())
+        {
+            stamps.CommandText="SELECT key,value FROM settings WHERE key LIKE 'career:%:fifa_last_sync_at'";
+            using var reader=stamps.ExecuteReader();
+            while(reader.Read())
+                if(CareerIdFromKey(reader.GetString(0)) is { } id
+                    &&DateTime.TryParse(reader.GetString(1),System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.RoundtripKind,out var at))
+                    synchronized[id]=at;
+        }
+        return ids.OrderByDescending(x=>synchronized.GetValueOrDefault(x,DateTime.MinValue)).ThenByDescending(x=>x).First();
+    }
+
+    private static long? CareerIdFromKey(string key)
+    {
+        var parts=key.Split(':');
+        return parts.Length>=3&&long.TryParse(parts[1],out var id)?id:null;
+    }
     public long? FindCareerIdByFifaSource(string sourcePath){var source=System.IO.Path.GetFileName(sourcePath);if(string.IsNullOrWhiteSpace(source))return null;using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT key FROM settings WHERE key LIKE 'career:%:fifa_source' AND value=$source ORDER BY key LIMIT 1";cmd.Parameters.AddWithValue("$source",source);var key=cmd.ExecuteScalar() as string;if(key is null)return null;var parts=key.Split(':');return parts.Length>=3&&long.TryParse(parts[1],out var id)?id:null;}
     public void SetSetting(string key,string value){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="INSERT INTO settings(key,value) VALUES($k,$v) ON CONFLICT(key) DO UPDATE SET value=excluded.value";cmd.Parameters.AddWithValue("$k",key);cmd.Parameters.AddWithValue("$v",value);cmd.ExecuteNonQuery();}
     public void Log(string category,string detail){using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="INSERT INTO debug_log(category,detail,created_at) VALUES($c,$d,$t)";cmd.Parameters.AddWithValue("$c",category);cmd.Parameters.AddWithValue("$d",detail);cmd.Parameters.AddWithValue("$t",DateTime.UtcNow.ToString("O"));cmd.ExecuteNonQuery();}

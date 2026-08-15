@@ -84,8 +84,32 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     bool _debugMode;public bool DebugMode{get=>_debugMode;set{if(Set(ref _debugMode,value))OnChanged(nameof(DebugVisibility));}}public Visibility DebugVisibility=>DebugMode?Visibility.Visible:Visibility.Collapsed;public string DebugText{get;private set;}="";
     string _fifaSyncStatus="Waiting for a FIFA 18 career save.";public string FifaSyncStatus{get=>_fifaSyncStatus;set=>Set(ref _fifaSyncStatus,value);}public string FifaSettingsDirectory{get;private set;}="";public bool AutoFifaWatch{get;set;}=true;public bool AutoFifaSquadSync{get;set;}=true;public bool HasPendingFifaMatch=>PendingMatchReviews.Count>0;
     public Visibility FifaReviewVisibility=>HasPendingFifaMatch?Visibility.Visible:Visibility.Collapsed;
-    public string FifaSyncBadge=>HasPendingFifaMatch?"MATCH READY":"FIFA SYNC";
-    public string LastFifaSyncText=>CurrentCareer is null?"No linked career":_db.GetSetting($"career:{CurrentCareer.Id}:fifa_last_sync")??"Not synchronized yet";
+    public string FifaSyncBadge=>HasPendingFifaMatch?"MATCH READY":LastFifaSyncAt is { } at&&DateTime.UtcNow-at<TimeSpan.FromMinutes(2)?"SYNCED":"FIFA SYNC";
+    /// <summary>
+    /// How long ago the save was read, phrased the way a person would say it. An absolute timestamp makes
+    /// the player work out whether the app is current; "synced a minute ago" answers the question they are
+    /// actually asking, which is whether what they just played has arrived.
+    /// </summary>
+    public string LastFifaSyncText
+    {
+        get
+        {
+            if(CurrentCareer is null)return "No linked career";
+            if(LastFifaSyncAt is not { } at)return _db.GetSetting($"career:{CurrentCareer.Id}:fifa_last_sync")??"Not synchronized yet";
+            return "Synced "+RelativeTime.Since(at,DateTime.UtcNow);
+        }
+    }
+
+    /// <summary>The exact moment, kept for the tooltip so the precise time is still one hover away.</summary>
+    public string LastFifaSyncTooltip=>CurrentCareer is null?"No linked career"
+        :_db.GetSetting($"career:{CurrentCareer.Id}:fifa_last_sync")??"Not synchronized yet";
+
+    private DateTime? LastFifaSyncAt
+        =>CurrentCareer is not null&&DateTime.TryParse(_db.GetSetting($"career:{CurrentCareer.Id}:fifa_last_sync_at"),
+            null,System.Globalization.DateTimeStyles.RoundtripKind,out var at)?at:null;
+
+    /// <summary>Raised on a timer so the age stays honest while the player looks at it.</summary>
+    public void RefreshSyncAge(){OnChanged(nameof(LastFifaSyncText));OnChanged(nameof(FifaSyncBadge));}
     public string FifaSourceText=>CurrentCareer is null?FifaSettingsDirectory:_db.GetSetting($"career:{CurrentCareer.Id}:fifa_source")??FifaSettingsDirectory;
     public string MatchReviewCount=>PendingMatchReviews.Count==1?"1 MATCH NEEDS REVIEW":$"{PendingMatchReviews.Count} MATCHES NEED REVIEW";
     public string SelectedReviewDetails=>SelectedMatchReview is null?"Select a detected match.":$"{SelectedMatchReview.Date} | {SelectedMatchReview.Venue} | {SelectedMatchReview.Competition}\n{SelectedMatchReview.Confidence}\n{SelectedMatchReview.Evidence}";
@@ -147,14 +171,20 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     public Task<Fifa18ScanResult> ScanFifaSaveAsync(bool automatic=false,CancellationToken ct=default)=>ScanFifaSaveAsync(automatic,0,ct);
 
+    /// <summary>
+    /// A career is identified by the FIFA player it follows, never by the save's file name. FIFA names every
+    /// save after the moment it was written, so the name changes on each save; treating it as identity made
+    /// every save look like a different career, which created a fresh companion career, reset the statistics
+    /// baseline, and left each match unable to work out its own goals and assists.
+    /// </summary>
     private async Task<Fifa18ScanResult> ScanFifaSaveAsync(bool automatic,int attempt,CancellationToken ct)
     {
         FifaSyncStatus=automatic?"FIFA save changed; reading a stable snapshot...":"Scanning the newest FIFA 18 career save...";
         var provider=new Fifa18SaveCareerDataProvider(_db);var scanCareerId=CurrentCareer?.Id;var activeSourceBeforeScan=scanCareerId is { } activeId?_db.GetSetting($"career:{activeId}:fifa_source"):null;var parsed=await provider.ParseLatestAsync(scanCareerId,FifaSettingsDirectory,ct);// The player can switch career while a scan is in flight; re-read once against the new career.
-        if(CurrentCareer?.Id!=scanCareerId&&attempt<2)return await ScanFifaSaveAsync(automatic,attempt+1,ct);_db.Log("fifa_sync",$"Parsed player={parsed.PlayerId}; career date={parsed.CurrentDate}; source={Path.GetFileName(parsed.SourcePath)}; automatic={automatic}.");var sourceName=Path.GetFileName(parsed.SourcePath);var routedId=_db.FindCareerIdByFifaSource(sourceName);if(routedId is null){var playerRoutedId=_db.FindCareerIdByFifaPlayerId(parsed.PlayerId);if(playerRoutedId is not null){var playerSource=_db.GetSetting($"career:{playerRoutedId}:fifa_source");if(string.IsNullOrWhiteSpace(playerSource)||string.Equals(playerSource,sourceName,StringComparison.OrdinalIgnoreCase))routedId=playerRoutedId;}}var sourceDiffersFromActive=!string.IsNullOrWhiteSpace(activeSourceBeforeScan)&&!string.Equals(activeSourceBeforeScan,sourceName,StringComparison.OrdinalIgnoreCase);if(routedId is null&&sourceDiffersFromActive)parsed=await provider.ParseLatestAsync(null,FifaSettingsDirectory,ct);if(routedId is not null&&CurrentCareer?.Id!=routedId){var routed=Careers.FirstOrDefault(x=>x.Id==routedId)??_db.GetCareer(routedId.Value);CurrentCareer=routed;parsed=await provider.ParseLatestAsync(routedId,FifaSettingsDirectory,ct);FifaSyncStatus=$"Automatically opened {routed.SaveName} for the detected FIFA save.";}
+        if(CurrentCareer?.Id!=scanCareerId&&attempt<2)return await ScanFifaSaveAsync(automatic,attempt+1,ct);_db.Log("fifa_sync",$"Parsed player={parsed.PlayerId}; career date={parsed.CurrentDate}; source={Path.GetFileName(parsed.SourcePath)}; automatic={automatic}.");var sourceName=Path.GetFileName(parsed.SourcePath);var routedId=_db.FindCareerIdByFifaSource(sourceName);if(routedId is null){var playerRoutedId=_db.FindCareerIdByFifaPlayerId(parsed.PlayerId);if(playerRoutedId is not null)routedId=playerRoutedId;}var sourceDiffersFromActive=!string.IsNullOrWhiteSpace(activeSourceBeforeScan)&&!string.Equals(activeSourceBeforeScan,sourceName,StringComparison.OrdinalIgnoreCase);if(routedId is null&&sourceDiffersFromActive)parsed=await provider.ParseLatestAsync(null,FifaSettingsDirectory,ct);if(routedId is not null&&CurrentCareer?.Id!=routedId){var routed=Careers.FirstOrDefault(x=>x.Id==routedId)??_db.GetCareer(routedId.Value);CurrentCareer=routed;parsed=await provider.ParseLatestAsync(routedId,FifaSettingsDirectory,ct);FifaSyncStatus=$"Automatically opened {routed.SaveName} for the detected FIFA save.";}
         if(CurrentCareer is null){_pendingFifa=parsed;FifaSyncStatus=$"Found {parsed.PlayerName} at {parsed.ClubName}. Create a linked career to import it.";NotifyFifaState();return new(Fifa18ScanDisposition.NoCareerSelected,parsed,FifaSyncStatus);}
-        var linkedId=_db.GetSetting($"career:{CurrentCareer.Id}:fifa_player_id");var linkedSource=_db.GetSetting($"career:{CurrentCareer.Id}:fifa_source");var sourceMatches=string.IsNullOrWhiteSpace(linkedSource)||string.Equals(linkedSource,sourceName,StringComparison.OrdinalIgnoreCase);var linked=linkedId==parsed.PlayerId.ToString()&&sourceMatches;var sameIdentity=CurrentCareer.PlayerName.Contains(parsed.PlayerName,StringComparison.OrdinalIgnoreCase)||parsed.PlayerName.Contains(CurrentCareer.PlayerName,StringComparison.OrdinalIgnoreCase);var sameClub=string.Equals(CurrentCareer.Club,parsed.ClubName,StringComparison.OrdinalIgnoreCase);
-        if((!string.IsNullOrWhiteSpace(linkedSource)&&!sourceMatches)||(!linked&&(!sameIdentity||!sameClub))){_pendingFifa=parsed;FifaSyncStatus=$"Save belongs to {parsed.PlayerName} at {parsed.ClubName} ({sourceName}); active companion career is {CurrentCareer.PlayerName} at {CurrentCareer.Club}.";NotifyFifaState();return new(Fifa18ScanDisposition.CareerMismatch,parsed,FifaSyncStatus);}
+        var linkedId=_db.GetSetting($"career:{CurrentCareer.Id}:fifa_player_id");var sameIdentity=CurrentCareer.PlayerName.Contains(parsed.PlayerName,StringComparison.OrdinalIgnoreCase)||parsed.PlayerName.Contains(CurrentCareer.PlayerName,StringComparison.OrdinalIgnoreCase);var sameClub=string.Equals(CurrentCareer.Club,parsed.ClubName,StringComparison.OrdinalIgnoreCase);
+        if(!CareerLinkResolver.BelongsToCareer(linkedId,parsed.PlayerId,sameIdentity,sameClub)){_pendingFifa=parsed;FifaSyncStatus=$"Save belongs to {parsed.PlayerName} at {parsed.ClubName} ({sourceName}); active companion career is {CurrentCareer.PlayerName} at {CurrentCareer.Club}.";NotifyFifaState();return new(Fifa18ScanDisposition.CareerMismatch,parsed,FifaSyncStatus);}
         var careerId=CurrentCareer.Id;
         var outcome=new FifaSyncService(_db).Apply(careerId,parsed,SyncOptions());
         ReloadCareers();_currentCareer=Careers.FirstOrDefault(x=>x.Id==careerId)??CurrentCareer;OnChanged(nameof(CurrentCareer));
@@ -205,7 +235,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     private void RecordFifaSync(Fifa18ParsedCareer parsed)
     {
         if(CurrentCareer is null)return;
-        _db.SetSetting($"career:{CurrentCareer.Id}:fifa_last_sync",$"Last synchronized {DateTime.Now:dd MMM yyyy, HH:mm}");
+        _db.SetSetting($"career:{CurrentCareer.Id}:fifa_last_sync",$"Last synchronized {DateTime.Now:dd MMM yyyy, HH:mm}");_db.SetSetting($"career:{CurrentCareer.Id}:fifa_last_sync_at",DateTime.UtcNow.ToString("O"));
         _db.SetSetting($"career:{CurrentCareer.Id}:fifa_source",Path.GetFileName(parsed.SourcePath));
         _db.SetSetting($"career:{CurrentCareer.Id}:fifa_last_error","");NotifyFifaState();
     }

@@ -4,6 +4,36 @@ using CareerCompanion.Core.Services;
 using CareerCompanion.Core.Providers.Fifa18;
 using System.Runtime.InteropServices;
 
+// Answers "what will the next launch do?" against a copy of a real database, so the question can be
+// settled before the app touches the player's own data.
+if(args.Length>0&&args[0]=="--preflight-fifa18")
+{
+    var original=Path.GetFullPath(args[1]);
+    var copy=Path.Combine(Path.GetTempPath(),$"touchline-preflight-{DateTime.Now:HHmmss}.db");
+    File.Copy(original,copy,true);
+    foreach(var suffix in new[]{"-wal","-shm"})if(File.Exists(original+suffix))File.Copy(original+suffix,copy+suffix,true);
+    var database=new Database(copy);database.Migrate();
+    var savePath=args.Length>2?Path.GetFullPath(args[2]):new Fifa18SaveLocator().FindLatestCareer();
+    if(savePath is null){Console.WriteLine("No FIFA 18 career save found.");return;}
+    var (data,fingerprint)=await new Fifa18SaveParser().ParseFileAsync(savePath);
+    var routed=database.FindCareerIdByFifaPlayerId(new Fifa18CareerNormalizer().Normalize(data,savePath,fingerprint).PlayerId);
+    Console.WriteLine($"save: {Path.GetFileName(savePath)}");
+    Console.WriteLine($"routes to career: {(routed is null?"none (a new career would be offered)":routed.ToString())}");
+    if(routed is null)return;
+    var linked=database.GetCareer(routed.Value);
+    Console.WriteLine($"  career {linked.Id}: {linked.PlayerName} @ {linked.Club}, matches before={database.GetMatches(linked.Id,500).Count}");
+    Fifa18SyncState? prior=null;
+    if(database.GetLatestProviderPayload(linked.Id,FifaSyncService.ProviderName) is { } payload)
+        prior=System.Text.Json.JsonSerializer.Deserialize<Fifa18SyncState>(payload);
+    var parsed=new Fifa18CareerNormalizer().Normalize(data,savePath,fingerprint,prior,database.GetCachedProviderNews(linked.Id,FifaSyncService.ProviderName));
+    var outcome=new FifaSyncService(database).Apply(linked.Id,parsed);
+    Console.WriteLine($"  {outcome.Message}");
+    foreach(var m in outcome.Imported)Console.WriteLine($"  imported: {FifaSyncService.Describe(m)} | goals={m.Goals} assists={m.Assists}");
+    foreach(var m in outcome.NeedsReview)Console.WriteLine($"  review:   {FifaSyncService.Describe(m)} | goals={m.Goals} assists={m.Assists}");
+    Console.WriteLine($"  matches after={database.GetMatches(linked.Id,500).Count}");
+    return;
+}
+
 // Read-only look at the running game. The fixture list is generated at load and never written to the save,
 // so the only place it exists is the live process. Facts already known from the save (career date, player
 // id, club id) are used as anchors: whatever holds those values is a career structure, and no pointer paths
@@ -536,6 +566,15 @@ if(args.Length>0&&args[0]=="--probe-fifa18-context")
     return;
 }
 
+// Everything above returns. Anything still here is the simulation, which writes a brand new career into
+// the destination it is given. An unrecognised flag must never reach it: falling through once wrote a
+// simulation into a real career database that happened to be named on the command line.
+if(args.Length>0&&args[0].StartsWith("--",StringComparison.Ordinal))
+{
+    Console.Error.WriteLine($"Unknown command '{args[0]}'. This tool writes a simulation when given no command, so it stops rather than guess.");
+    Environment.ExitCode=1;
+    return;
+}
 var count=args.Length>0&&int.TryParse(args[0],out var n)?Math.Clamp(n,1,500):20;
 var explicitDestination=args.Skip(1).FirstOrDefault(x=>!x.StartsWith("--",StringComparison.Ordinal));
 var destination=explicitDestination is null?Path.Combine(Path.GetTempPath(),$"touchline-simulation-{DateTime.Now:yyyyMMdd-HHmmss}.db"):Path.GetFullPath(explicitDestination);

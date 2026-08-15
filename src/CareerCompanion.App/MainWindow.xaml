@@ -365,7 +365,8 @@
           </Border>
           <StackPanel Grid.Column="1" Margin="14,0" VerticalAlignment="Center">
             <TextBlock Text="{Binding FifaSyncStatus}" TextTrimming="CharacterEllipsis" FontSize="13"/>
-            <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis">
+            <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"
+                       ToolTip="{Binding LastFifaSyncTooltip, Mode=OneWay}">
               <Run Text="{Binding LastFifaSyncText, Mode=OneWay}"/>
               <Run Text="  ·  " Foreground="{StaticResource Stroke}"/>
               <Run Text="{Binding FifaSourceText, Mode=OneWay}"/>

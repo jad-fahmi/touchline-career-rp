@@ -59,6 +59,10 @@ public partial class MainWindow : Window
         {
             ApplyDarkTitleBar();
             RestartFifaWatcher();
+            // "Synced a minute ago" has to keep counting, otherwise it is just a timestamp that lies slowly.
+            var age = new DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
+            age.Tick += (_, _) => _vm.RefreshSyncAge();
+            age.Start();
             if (_vm.AutoFifaWatch && Directory.Exists(_vm.FifaSettingsDirectory)) await ScanFifaAsync(true);
         };
         Closed += (_, _) => { _fifaWatcher?.Dispose(); _db.Checkpoint(); };
